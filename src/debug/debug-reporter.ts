@@ -1,5 +1,7 @@
+import { Alignment } from "/src/debug/cell-alignment";
 import { AllocationRow } from "/src/debug/reports/allocation-row";
 import { TargetRow } from "/src/debug/reports/target-row";
+import { Table } from "/src/debug/table";
 import { Context } from "/src/models/context";
 import { ServerInfo } from "/src/models/server-info";
 import { TargetInfo } from "/src/models/target-info";
@@ -45,17 +47,27 @@ export class DebugReporter
         const ns = this.context.ns;
         this.printSection("Targets");
 
+        const table = new Table()
+            .column("Target")
+            .column("State")
+            .column("Score", undefined, Alignment.Right)
+            .column("Priority", undefined, Alignment.Right)
+            .column("Money", undefined, Alignment.Right)
+            .column("Security", undefined, Alignment.Right);
+
         for (const row of rows) {
-            this.print(
-                `${row.target}: ` +
-                `${row.state} | ` +
-                `${ns.format.number(row.score)}  | ` +
-                `${ns.format.number(row.priority)}  | ` +
-                `${ns.format.number(row.currentMoney)}/` +
-                `${ns.format.number(row.maxMoney)} | ` +
-                `${ns.format.number(row.currentSecurity)}/` +
-                `${ns.format.number(row.minSecurity)}`
+            table.row(
+                row.target,
+                row.state,
+                ns.format.number(row.score),
+                ns.format.number(row.priority),
+                `${ns.format.number(row.currentMoney)}/${ns.format.number(row.maxMoney)}`,
+                `${ns.format.number(row.currentSecurity)}/${ns.format.number(row.minSecurity)}`,
             );
+        }
+
+        for (const line of table.render()) {
+            this.print(line);
         }
     }
 
@@ -93,16 +105,28 @@ export class DebugReporter
 
     private printAllocation(rows: AllocationRow[]): void
     {
+        const ns = this.context.ns;
         this.printSection('Allocation')
 
+        const table = new Table()
+            .column("Target")
+            .column("Action")
+            .column("Workers", undefined, Alignment.Right)
+            .column("Threads", undefined, Alignment.Right)
+            .column("RAM", undefined, Alignment.Right)
+
         for (const row of rows) {
-            this.print(
-                `${row.target}: ` +
-                `${row.action} | ` +
-                `${row.workers} workers | ` +
-                `${row.threads} threads | ` +
-                `${this.context.ns.format.ram(row.ram)}`
+            table.row(
+                row.target,
+                row.action,
+                ns.format.number(row.workers),
+                ns.format.number(row.threads),
+                ns.format.ram(row.ram),
             );
+        }
+
+        for (const line of table.render()) {
+            this.print(line);
         }
     }
 
