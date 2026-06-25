@@ -1,14 +1,14 @@
 import { Context } from '/src/models/context';
-
 import { ServerInfo } from "/src/models/server-info";
 import { WorkerJob } from "/src/models/worker-job";
-
 import { SCRIPT_MAP } from '/src/utils/constants';
 
-export class Deployer {
+export class Deployer 
+{
     constructor(private readonly context: Context) {}
 
-    public async deploy(servers: ServerInfo[], jobs: WorkerJob[]): Promise<void> {
+    public async deploy(servers: ServerInfo[], jobs: WorkerJob[]): Promise<void> 
+    {
         const {ns} = this.context;
         const usedHosts = new Set(jobs.map(job => job.hostname));
         const workers = servers.filter(server =>
@@ -28,7 +28,8 @@ export class Deployer {
         }
     }
 
-    private deployJob(job: WorkerJob): void {
+    private deployJob(job: WorkerJob): void 
+    {
         const {ns} = this.context;
         const processes = ns.ps(job.hostname);
         const script = SCRIPT_MAP[job.action];

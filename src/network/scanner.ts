@@ -1,11 +1,12 @@
 import { Context } from "/src/models/context";
-
 import { ServerInfo } from "/src/models/server-info";
 
-export class Scanner {
+export class Scanner 
+{
     constructor(protected readonly context: Context) {}
 
-    public scan(): ServerInfo[] {
+    public scan(): ServerInfo[] 
+    {
         const discovered: Set<string> = new Set<string>();
         const servers: ServerInfo[] = [];
 
@@ -14,7 +15,8 @@ export class Scanner {
         return servers;
     }
 
-    private scanRecursive(hostname: string, discovered: Set<string>, servers: ServerInfo[]): void {
+    private scanRecursive(hostname: string, discovered: Set<string>, servers: ServerInfo[]): void 
+    {
         if (discovered.has(hostname)){
             return;
         } 
@@ -27,7 +29,8 @@ export class Scanner {
         }
     }
 
-    private createServerInfo(hostname: string): ServerInfo {
+    private createServerInfo(hostname: string): ServerInfo 
+    {
         const ns = this.context.ns;
         const server = ns.getServer(hostname);
 

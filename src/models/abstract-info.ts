@@ -1,4 +1,5 @@
-export interface AbstractInfo {
+export interface AbstractInfo 
+{
     hostname: string;
     maxMoney: number;
     currentMoney: number;

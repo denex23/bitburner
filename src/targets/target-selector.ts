@@ -1,18 +1,17 @@
 import { Context } from "/src/models/context"
-
-import { ServerInfo } from "src/models/server-info"
-import { TargetInfo } from "src/models/target-info"
-import { calculateScore } from "src/targets/target-score"
-
+import { ServerInfo } from "/src/models/server-info"
+import { TargetInfo } from "/src/models/target-info"
+import { calculateScore } from "/src/targets/target-score"
 import { TargetState } from '/src/utils/constants';
 import { STATE_WEIGHT } from "/src/utils/constants"
-
 import { calculateMoneyRatio, calculateSecurityDelta } from "/src/utils/calculation-helper"
 
-export class TargetSelector {
+export class TargetSelector 
+{
     constructor(protected readonly context: Context) {}
 
-    public select(servers: ServerInfo[]): TargetInfo[] {
+    public select(servers: ServerInfo[]): TargetInfo[] 
+    {
         const targets: TargetInfo[] = [];
 
         for (const server of servers) {
@@ -39,7 +38,8 @@ export class TargetSelector {
         return this.sortTargets(targets).slice(0, 15);
     }
 
-    private determineState(server: ServerInfo): TargetState {
+    private determineState(server: ServerInfo): TargetState 
+    {
         const moneyRatio = calculateMoneyRatio(server);
         const securityDelta = calculateSecurityDelta(server);
 
@@ -54,7 +54,8 @@ export class TargetSelector {
         return TargetState.Farm;
     }
 
-    private sortTargets(targets: TargetInfo[]): TargetInfo[] {
+    private sortTargets(targets: TargetInfo[]): TargetInfo[] 
+    {
         return targets.sort((a, b) => {
             const stateDiff = STATE_WEIGHT[b.state] - STATE_WEIGHT[a.state];
 
@@ -62,7 +63,8 @@ export class TargetSelector {
         });
     }
 
-    private calculatePriority(server: ServerInfo, score: number, state: TargetState): number {
+    private calculatePriority(server: ServerInfo, score: number, state: TargetState): number 
+    {
         const moneyDeficit = 1 - calculateMoneyRatio(server);
         const securityDelta = calculateSecurityDelta(server);
         
