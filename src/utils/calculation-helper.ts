@@ -1,4 +1,4 @@
-import { AbstractInfo } from "src/models/abstract-info"
+import { AbstractInfo } from "/src/models/abstract-info"
 
 export function calculateSecurityDelta(server: AbstractInfo): number {
     return server.currentSecurity - server.minSecurity;
