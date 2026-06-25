@@ -1,3 +1,5 @@
+import { AllocationRow } from "/src/debug/reports/allocation-row";
+import { TargetRow } from "/src/debug/reports/target-row";
 import { Context } from "/src/models/context";
 import { ServerInfo } from "/src/models/server-info";
 import { TargetInfo } from "/src/models/target-info";
@@ -10,7 +12,7 @@ export class DebugReporter
     public report(servers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[]): void
     {
         this.reportTargets(targets);
-        this.reportJobs(jobs);
+        this.reportAllocation(jobs);
         this.reportRam(jobs);
         this.reportHack(jobs);
         this.reportActions(jobs);
@@ -20,12 +22,88 @@ export class DebugReporter
 
     private reportTargets(targets: TargetInfo[]): void
     {
+        this.printTargets(this.buildTargetsReport(targets));
         
     }
 
-    private reportJobs(jobs: WorkerJob[]): void
+    private buildTargetsReport(targets: TargetInfo[]): TargetRow[]
     {
+        return targets.map(target => ({
+            target: target.hostname,
+            state: target.state,
+            score: target.score,
+            priority: target.priority,
+            currentMoney: target.currentMoney,
+            maxMoney: target.maxMoney,
+            currentSecurity: target.currentSecurity,
+            minSecurity: target.minSecurity,
+        }));
+    }
 
+    private printTargets(rows: TargetRow[]): void
+    {
+        const ns = this.context.ns;
+        this.printSection("Targets");
+
+        for (const row of rows) {
+            this.print(
+                `${row.target}: ` +
+                `${row.state} | ` +
+                `${ns.format.number(row.score)}  | ` +
+                `${ns.format.number(row.priority)}  | ` +
+                `${ns.format.number(row.currentMoney)}/` +
+                `${ns.format.number(row.maxMoney)} | ` +
+                `${ns.format.number(row.currentSecurity)}/` +
+                `${ns.format.number(row.minSecurity)}`
+            );
+        }
+    }
+
+    private reportAllocation(jobs: WorkerJob[]): void
+    {
+        this.printAllocation(this.buildAllocationReport(jobs))
+    }
+
+    private buildAllocationReport(jobs: WorkerJob[]): AllocationRow[]
+    {
+        const rows = new Map<string, AllocationRow>();
+
+        for (const job of jobs) {
+            const row = rows.get(job.target);
+
+            if (row) {
+                row.workers++;
+                row.threads += job.threads;
+                row.ram += job.allocatedRam;
+
+                continue;
+            }
+
+            rows.set(job.target, {
+                target: job.target,
+                action: job.action,
+                workers: 1,
+                threads: job.threads,
+                ram: job.allocatedRam,
+            });
+        }
+
+        return [...rows.values()];
+    }
+
+    private printAllocation(rows: AllocationRow[]): void
+    {
+        this.printSection('Allocation')
+
+        for (const row of rows) {
+            this.print(
+                `${row.target}: ` +
+                `${row.action} | ` +
+                `${row.workers} workers | ` +
+                `${row.threads} threads | ` +
+                `${this.context.ns.format.ram(row.ram)}`
+            );
+        }
     }
 
     private reportRam(jobs: WorkerJob[]): void
@@ -53,24 +131,20 @@ export class DebugReporter
 
     }
 
+    private printSection(section: string): void
+    {
+        this.context.ns.tprint(section);
+    }
+
+    private print(message: string): void
+    {
+        this.context.ns.tprint(message);
+    }
+
     public oldStuf(servers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[])
     {
         const ns = this.context.ns;
-        for (const target of targets) {
-            
-      const moneyRatio = 0; //calculateMoneyRatio(target);
-      const securityDelta = 0; //calculateSecurityDelta(target);
-
-      ns.tprint(
-        `[TARGET] ` +
-        `${target.hostname} | ` +
-        `state=${target.state} | ` +
-        `score=${Math.round(target.score)} | ` +
-        `prio=${Math.round(target.priority)} | ` +
-        `money=${moneyRatio.toFixed(2)} | ` +
-        `sec=${securityDelta.toFixed(2)}`
-      );
-    }
+        
 
     
     ns.tprint("========== JOBS ==========");
