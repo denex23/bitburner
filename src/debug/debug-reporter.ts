@@ -13,7 +13,7 @@ export class DebugReporter
 
     public report(servers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[]): void
     {
-        this.print(this.context.ns.format.time(Date.now()));
+        this.printDate();
         this.reportTargets(targets);
         this.reportAllocation(jobs);
         this.reportWorkers(servers);
@@ -234,6 +234,14 @@ export class DebugReporter
     private print(message: string): void 
     {
         this.context.ns.tprint(message);
+    }
+
+    private printDate(): void
+    {
+        const date = new Date(Date.now()); 
+        const locale: Intl.LocalesArgument = "de-DE";
+
+        this.print(date.toLocaleString(locale));
     }
 
     private printSection(title: string): void 
