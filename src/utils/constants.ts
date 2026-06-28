@@ -1,3 +1,5 @@
+import { NS } from '@ns';
+
 // Define TargetState as const object
 export const TargetState = {
     Weaken: "weaken",
@@ -29,9 +31,9 @@ export const STATE_WEIGHT: Record<TargetState, number> = {
 };
 
 export const SCRIPT_MAP: Record<WorkerAction, string> = {
-    [WorkerAction.Hack]: "src/workers/hack.js",
-    [WorkerAction.Grow]: "src/workers/grow.js",
-    [WorkerAction.Weaken]: "src/workers/weaken.js",
+    [WorkerAction.Hack]: "src/workers/hack.ts",
+    [WorkerAction.Grow]: "src/workers/grow.ts",
+    [WorkerAction.Weaken]: "src/workers/weaken.ts",
 };
 
 export const SCRIPT_RAM: Record<WorkerAction, number> = {

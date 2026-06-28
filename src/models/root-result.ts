@@ -1,4 +1,5 @@
-export interface RootResult {
+export interface RootResult 
+{
     hostname: string;
     success: boolean;
     alreadyRooted: boolean;

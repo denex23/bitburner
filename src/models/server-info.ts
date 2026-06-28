@@ -1,6 +1,7 @@
 import { AbstractInfo } from "src/models/abstract-info"
 
-export interface ServerInfo extends AbstractInfo {
+export interface ServerInfo extends AbstractInfo 
+{
     rooted: boolean;
     maxRam: number;
     chance: number;

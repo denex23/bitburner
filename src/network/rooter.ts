@@ -2,10 +2,12 @@ import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info"
 import { RootResult } from "src/models/root-result"
 
-export class Rooter {
+export class Rooter 
+{
     constructor(protected readonly context: Context) {}
 
-    public root(servers: ServerInfo[]): RootResult[] {
+    public root(servers: ServerInfo[]): RootResult[] 
+    {
         const results: RootResult[] = [];
         const availablePorts = this.getAvailablePortPrograms();
 
@@ -20,7 +22,8 @@ export class Rooter {
         return results;
     }
 
-    private tryRoot(server: ServerInfo, availablePorts: number): RootResult {
+    private tryRoot(server: ServerInfo, availablePorts: number): RootResult 
+    {
         const {ns} = this.context;
 
         if (server.rooted) {
@@ -55,7 +58,8 @@ export class Rooter {
         };
     }
 
-    private getAvailablePortPrograms(): number {
+    private getAvailablePortPrograms(): number 
+    {
         const {ns} = this.context;
         let count = 0;
 
@@ -68,7 +72,8 @@ export class Rooter {
         return count;
     }
 
-    private openPorts(hostname: string): void {
+    private openPorts(hostname: string): void 
+    {
         const {ns} = this.context;
         if (ns.fileExists("BruteSSH.exe", "home")) ns.brutessh(hostname);
         if (ns.fileExists("FTPCrack.exe", "home")) ns.ftpcrack(hostname);

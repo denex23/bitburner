@@ -1,6 +1,7 @@
 import { WorkerAction } from "src/utils/constants";
 
-export interface WorkerJob {
+export interface WorkerJob 
+{
     hostname: string;
     target: string;
     action: WorkerAction;

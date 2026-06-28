@@ -6,10 +6,12 @@ import { WorkerAction } from "src/utils/constants";
 import { TARGET_ACTION } from "src/utils/constants";
 import { SCRIPT_RAM } from 'src/utils/constants';
 
-export class Allocator {
+export class Allocator 
+{
     constructor(private readonly context: Context) {}
 
-    public allocate(servers: ServerInfo[], targets: TargetInfo[]): WorkerJob[] {
+    public allocate(servers: ServerInfo[], targets: TargetInfo[]): WorkerJob[] 
+    {
         const {ns} = this.context;
         const jobs: WorkerJob[] = [];
         const workers = this.getWorkers(servers);
@@ -24,16 +26,13 @@ export class Allocator {
         let workerIndex = 0;
         workerIndex = this.allocateWork(workers, workTargets, jobs, workerIndex);
 
-        ns.tprint(
-            `WORK=${workerIndex}/${workers.length}`
-        );
-
         this.allocateFarm(workers, farmTargets, jobs, workerIndex);
 
         return jobs;
     }
 
-    private getWorkers(servers: ServerInfo[]): ServerInfo[] {
+    private getWorkers(servers: ServerInfo[]): ServerInfo[] 
+    {
         return servers
             .filter(server =>
                 server.rooted &&
@@ -45,7 +44,8 @@ export class Allocator {
             );
     }
 
-    private allocateWork(workers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[], startIndex: number): number {
+    private allocateWork(workers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[], startIndex: number): number 
+    {
         if (targets.length === 0) {
             return startIndex;
         }
@@ -80,7 +80,8 @@ export class Allocator {
         return workerIndex;
     }
 
-    private allocateFarm(workers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[], startIndex: number): void {
+    private allocateFarm(workers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[], startIndex: number): void 
+    {
         if (targets.length === 0) {
             return;
         }
@@ -96,7 +97,8 @@ export class Allocator {
         }
     }
 
-    private createJob(worker: ServerInfo, target: string, action: WorkerAction): WorkerJob {
+    private createJob(worker: ServerInfo, target: string, action: WorkerAction): WorkerJob 
+    {
         const threads = Math.floor(worker.maxRam / SCRIPT_RAM[action]);
 
         return {
