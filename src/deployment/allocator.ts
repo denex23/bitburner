@@ -5,6 +5,7 @@ import { WorkerJob } from "src/models/worker-job";
 import { WorkerAction } from "src/utils/constants";
 import { TARGET_ACTION } from "src/utils/constants";
 import { SCRIPT_RAM } from 'src/utils/constants';
+import { calculateMoneyRatio, calculateSecurityDelta } from '../utils/calculation-helper';
 
 export class Allocator 
 {
@@ -24,7 +25,7 @@ export class Allocator
             .sort((a, b) => b.priority - a.priority);
 
         let workerIndex = 0;
-        workerIndex = this.allocateWork(workers, workTargets, jobs, workerIndex);
+        workerIndex = this.allocateWork(workers, workTargets, jobs, workerIndex, farmTargets.length === 0);
 
         this.allocateFarm(workers, farmTargets, jobs, workerIndex);
 
@@ -44,7 +45,7 @@ export class Allocator
             );
     }
 
-    private allocateWork(workers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[], startIndex: number): number 
+    private allocateWork(workers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[], startIndex: number, useAllRam: boolean = false): number 
     {
         if (targets.length === 0) {
             return startIndex;
@@ -58,7 +59,7 @@ export class Allocator
             (sum, worker) => sum + worker.maxRam, 0
         );
         
-        const workRam = totalRam * 0.8;
+        const workRam = useAllRam ? totalRam : totalRam * 0.8;
         
         let workerIndex = startIndex;
         for (const target of targets) {
@@ -70,7 +71,7 @@ export class Allocator
             while (workerIndex < workers.length && assignedRam < allocatedRam) {
                 const worker = workers[workerIndex];
 
-                jobs.push(this.createJob(worker, target.hostname, TARGET_ACTION[target.state]));
+                jobs.push(this.createJob(worker, target, TARGET_ACTION[target.state]));
 
                 assignedRam += worker.maxRam;
                 workerIndex++;
@@ -86,42 +87,62 @@ export class Allocator
             return;
         }
 
-        let targetIndex = 0;
-        for (let workerIndex = startIndex; workerIndex < workers.length; workerIndex++) {
-            const worker = workers[workerIndex];
-            const target = targets[targetIndex % targets.length];
+        const maxFarmWorkers = Math.ceil(workers.length * 0.2);
+        const farmWorkers = workers.slice(startIndex, startIndex + maxFarmWorkers);
+        const totalPriority = targets.reduce(
+            (sum, target) => sum + target.priority, 0
+        );
 
-            jobs.push(this.createJob(worker, target.hostname, TARGET_ACTION[target.state]));
-            
-            targetIndex++;
+        for (const target of targets) {
+            const targetWorkerCount = Math.floor((target.priority / totalPriority) * farmWorkers.length);
+
+            for (let i = 0; i < targetWorkerCount; i++) {
+                const worker = farmWorkers.shift();
+
+                if (worker === undefined) {
+                    return;
+                }
+
+                jobs.push(this.createJob(worker, target, TARGET_ACTION[target.state]));
+            }
         }
     }
 
-    private createJob(worker: ServerInfo, target: string, action: WorkerAction): WorkerJob 
+    private createJob(worker: ServerInfo, target: TargetInfo, action: WorkerAction): WorkerJob 
     {
         const threads = this.calculateThreads(worker.maxRam, target, action);
 
         return {
             hostname: worker.hostname,
-            target,
+            target: target.hostname,
             action,
             threads,
-            allocatedRam: worker.maxRam,
+            allocatedRam: threads * SCRIPT_RAM[action],
         };
     }
 
-    private calculateThreads(workerRam: number, target: string, action: WorkerAction): number {
+    private calculateThreads(workerRam: number, target: TargetInfo, action: WorkerAction): number 
+    {
         const maxThreads = Math.floor(workerRam / SCRIPT_RAM[action]);
 
-        if (action !== WorkerAction.Hack) {
-            return maxThreads;
+        if (WorkerAction.Hack === action) {
+            return Math.min(maxThreads, this.calculateHackThreads(target));
         }
 
-        return Math.min(maxThreads, this.calculateHackThreads(target));
+        if (WorkerAction.Weaken === action) {
+            return Math.min(maxThreads, this.calculateWeakenThreads(target));
+        }
+
+        if (WorkerAction.Grow === action) {
+            return Math.min(maxThreads, this.calculateGrowThreads(target));
+        }
+        
+        return maxThreads;
     }
 
-    private calculateHackThreads(target: string): number {
-        const hackPercentage = this.context.ns.hackAnalyze(target);
+    private calculateHackThreads(target: TargetInfo): number 
+    {
+        const hackPercentage = this.context.ns.hackAnalyze(target.hostname);
         const moneyToHack = 0.1;
 
         if (hackPercentage <= 0) {
@@ -129,5 +150,20 @@ export class Allocator
         }
 
         return Math.max(1, Math.floor(moneyToHack / hackPercentage));
+    }
+
+    private calculateWeakenThreads(target: TargetInfo): number 
+    {
+        const securityDelta = calculateSecurityDelta(target);
+
+        // TODO: exchange 0.05 with ns.weakenAnalyze(threads, cores) when using cores
+        return Math.max(1, Math.ceil(securityDelta / 0.05));
+    }
+
+    private calculateGrowThreads(target: TargetInfo): number 
+    {
+        const multiplier = target.maxMoney / Math.max(1, target.currentMoney);
+
+        return Math.max(1, Math.ceil(this.context.ns.growthAnalyze(target.hostname, multiplier)));
     }
 }
