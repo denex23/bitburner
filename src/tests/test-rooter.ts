@@ -1,8 +1,7 @@
 import { NS } from '@ns';
-import { Context } from "/src/models/context";
-
-import { Scanner } from "/src/network/scanner";
-import { Rooter } from "/src/network/rooter";
+import { Context } from "src/models/context";
+import { Scanner } from "src/network/scanner";
+import { Rooter } from "src/network/rooter";
 
 export async function main(ns: NS) {
     const context = new Context(ns)

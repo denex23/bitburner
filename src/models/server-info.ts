@@ -1,4 +1,4 @@
-import { AbstractInfo } from "/src/models/abstract-info"
+import { AbstractInfo } from "src/models/abstract-info"
 
 export interface ServerInfo extends AbstractInfo {
     rooted: boolean;

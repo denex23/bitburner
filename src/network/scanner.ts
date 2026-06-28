@@ -1,6 +1,5 @@
-import { Context } from "/src/models/context";
-
-import { ServerInfo } from "/src/models/server-info";
+import { Context } from "src/models/context";
+import { ServerInfo } from "src/models/server-info";
 
 export class Scanner {
     constructor(protected readonly context: Context) {}

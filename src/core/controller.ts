@@ -1,11 +1,10 @@
 import { NS } from '@ns';
-import { Context } from '/src/models/context';
-
-import { Scanner } from "/src/network/scanner";
-import { Rooter } from "/src/network/rooter";
-import { TargetSelector } from "/src/targets/target-selector";
-import { Allocator } from "/src/deployment/allocator";
-import { Deployer } from "/src/deployment/deployer";
+import { Context } from 'src/models/context';
+import { Scanner } from "src/network/scanner";
+import { Rooter } from "src/network/rooter";
+import { TargetSelector } from "src/targets/target-selector";
+import { Allocator } from "src/deployment/allocator";
+import { Deployer } from "src/deployment/deployer";
 
 import { calculateMoneyRatio, calculateSecurityDelta } from "/src/utils/calculation-helper"
 
