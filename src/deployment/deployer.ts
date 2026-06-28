@@ -9,17 +9,11 @@ export class Deployer
 
     public async deploy(servers: ServerInfo[], jobs: WorkerJob[]): Promise<void> 
     {
-        const usedHosts = new Set(jobs.map(job => job.hostname));
-        const workers = servers.filter(server =>
-            server.rooted &&
-            server.maxRam > 0 &&
-            server.hostname !== "home"
-        );
+        const desiredJobs = this.createDesiredJobKeys(jobs);
+        const workers = this.getWorker(servers);
 
         for (const worker of workers) {
-            if (!usedHosts.has(worker.hostname)) {
-                this.context.ns.killall(worker.hostname);
-            }
+            this.stopObsoleteProcesses(worker, desiredJobs);
         }
 
         for (const job of jobs) {
@@ -30,27 +24,17 @@ export class Deployer
     private async deployJob(job: WorkerJob): Promise<void> 
     {
         const ns = this.context.ns;
-
-        const processes = ns.ps(job.hostname);
         const script = SCRIPT_MAP[job.action];
-        const desiredArgs = [job.target];
 
         if (!ns.fileExists(script, "home")) {
             ns.tprint(`[SCRIPT MISSING] ${script}`);
-            
             return;
         }
 
-        const existing = processes.find(process =>
-            process.filename === script &&
-            JSON.stringify(process.args) === JSON.stringify(desiredArgs)
-        );
-
-        if (existing) {
+        if (this.isJobRunning(job, script)) {
             return;
         }
 
-        ns.killall(job.hostname);
         await ns.scp(script, job.hostname);
 
         const pid = ns.exec(
@@ -70,6 +54,46 @@ export class Deployer
                 `workerRam=${ns.getServerMaxRam(job.hostname)} ` +
                 `needed=${job.threads * ns.getScriptRam(script)}`
             );
+        }
+    }
+
+    private getWorker(servers: ServerInfo[]): ServerInfo[] {
+        return servers.filter(server =>
+            server.rooted &&
+            server.maxRam > 0 &&
+            server.hostname !== "home"
+        );
+    }
+
+    private createDesiredJobKeys(jobs: WorkerJob[]): Set<string> 
+    {
+        return new Set(jobs.map(job => 
+            this.createJobKey(job.hostname, SCRIPT_MAP[job.action], job.target)
+        ));
+    }
+
+    private createJobKey(hostname: string, script: string, target: string): string 
+    {
+        return `${hostname}|${script}|${target}`;
+    }
+
+    private isJobRunning(job: WorkerJob, script: string): boolean 
+    {
+        return this.context.ns.ps(job.hostname).some(process =>
+            process.filename === script &&
+            String(process.args[0] ?? "") === job.target
+        );
+    }
+
+    private stopObsoleteProcesses(worker: ServerInfo, desiredJobs: Set<string>): void 
+    {
+        for (const process of this.context.ns.ps(worker.hostname)) {
+            const target = String(process.args[0] ?? "");
+            const jobKey = this.createJobKey(worker.hostname, process.filename, target);
+
+            if (!desiredJobs.has(jobKey)) {
+                this.context.ns.kill(process.pid);
+            }
         }
     }
 }
