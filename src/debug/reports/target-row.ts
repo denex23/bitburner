@@ -1,4 +1,4 @@
-import { TargetState } from "/src/utils/constants";
+import { TargetState } from "src/utils/constants";
 
 export interface TargetRow
 {

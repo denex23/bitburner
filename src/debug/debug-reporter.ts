@@ -1,11 +1,11 @@
-import { Alignment } from "/src/debug/cell-alignment";
-import { AllocationRow } from "/src/debug/reports/allocation-row";
-import { TargetRow } from "/src/debug/reports/target-row";
-import { Table } from "/src/debug/table";
-import { Context } from "/src/models/context";
-import { ServerInfo } from "/src/models/server-info";
-import { TargetInfo } from "/src/models/target-info";
-import { WorkerJob } from "/src/models/worker-job";
+import { Alignment } from "src/debug/cell-alignment";
+import { AllocationRow } from "src/debug/reports/allocation-row";
+import { TargetRow } from "src/debug/reports/target-row";
+import { Table } from "src/debug/table";
+import { Context } from "src/models/context";
+import { ServerInfo } from "src/models/server-info";
+import { TargetInfo } from "src/models/target-info";
+import { WorkerJob } from "src/models/worker-job";
 
 export class DebugReporter 
 {
@@ -15,9 +15,6 @@ export class DebugReporter
     {
         this.reportTargets(targets);
         this.reportAllocation(jobs);
-        this.reportRam(jobs);
-        this.reportHack(jobs);
-        this.reportActions(jobs);
         this.reportWorkers(servers);
         this.reportStaleWorkers(servers, jobs);
     }
@@ -42,7 +39,7 @@ export class DebugReporter
         }));
     }
 
-    private printTargets(rows: TargetRow[]): void
+    private printTargets(rows: TargetRow[]): void 
     {
         const ns = this.context.ns;
         this.printSection("Targets");
@@ -61,14 +58,12 @@ export class DebugReporter
                 row.state,
                 ns.format.number(row.score),
                 ns.format.number(row.priority),
-                `${ns.format.number(row.currentMoney)}/${ns.format.number(row.maxMoney)}`,
-                `${ns.format.number(row.currentSecurity)}/${ns.format.number(row.minSecurity)}`,
+                `${ns.format.number(row.currentMoney)} / ${ns.format.number(row.maxMoney)}`,
+                `${row.currentSecurity.toFixed(2)} / ${row.minSecurity.toFixed(2)}`
             );
         }
 
-        for (const line of table.render()) {
-            this.print(line);
-        }
+        this.printTable(table);
     }
 
     private reportAllocation(jobs: WorkerJob[]): void
@@ -103,173 +98,153 @@ export class DebugReporter
         return [...rows.values()];
     }
 
-    private printAllocation(rows: AllocationRow[]): void
+    private printAllocation(rows: AllocationRow[]): void 
     {
         const ns = this.context.ns;
-        this.printSection('Allocation')
+        this.printSection("Allocation");
 
         const table = new Table()
             .column("Target")
             .column("Action")
             .column("Workers", undefined, Alignment.Right)
             .column("Threads", undefined, Alignment.Right)
-            .column("RAM", undefined, Alignment.Right)
+            .column("RAM", undefined, Alignment.Right);
 
         for (const row of rows) {
             table.row(
                 row.target,
                 row.action,
-                ns.format.number(row.workers),
-                ns.format.number(row.threads),
-                ns.format.ram(row.ram),
+                row.workers.toString(),
+                row.threads.toString(),
+                ns.format.ram(row.ram)
             );
         }
 
-        for (const line of table.render()) {
-            this.print(line);
+        this.printTable(table);
+    }
+
+    private reportWorkers(servers: ServerInfo[]): void 
+    {
+        const actionCounts = new Map<string, number>();
+
+        let total = 0;
+        let active = 0;
+        let idle = 0;
+        let processes = 0;
+
+        for (const server of servers) {
+            if (server.hostname === "home" || !server.rooted) {
+                continue;
+            }
+
+            total++;
+
+            const running = this.context.ns.ps(server.hostname);
+
+            if (running.length === 0) {
+                idle++;
+                continue;
+            }
+
+            active++;
+            processes += running.length;
+
+            for (const process of running) {
+                const action = this.getActionFromFilename(process.filename);
+
+                actionCounts.set(
+                    action,
+                    (actionCounts.get(action) ?? 0) + 1
+                );
+            }
         }
+
+        this.printSection("Workers");
+
+        const table = new Table()
+            .column("Metric")
+            .column("Value", undefined, Alignment.Right);
+
+        table.row("Total", total.toString());
+        table.row("Active", active.toString());
+        table.row("Idle", idle.toString());
+        table.row("Processes", processes.toString());
+
+        for (const [action, count] of actionCounts) {
+            table.row(action, count.toString());
+        }
+
+        this.printTable(table);
     }
 
-    private reportRam(jobs: WorkerJob[]): void
+    private reportStaleWorkers(servers: ServerInfo[], jobs: WorkerJob[]): void 
     {
+        const usedHosts = new Set(jobs.map(job => job.hostname));
+        const staleHosts: string[] = [];
 
+        for (const server of servers) {
+            if (server.hostname === "home" || !server.rooted) {
+                continue;
+            }
+
+            if (usedHosts.has(server.hostname)) {
+                continue;
+            }
+
+            if (this.context.ns.ps(server.hostname).length === 0) {
+                continue;
+            }
+
+            staleHosts.push(server.hostname);
+        }
+
+        if (staleHosts.length === 0) {
+            return;
+        }
+
+        this.printSection("Stale Workers");
+
+        const table = new Table()
+            .column("Host");
+
+        for (const host of staleHosts) {
+            table.row(host);
+        }
+
+        this.printTable(table);
     }
 
-    private reportHack(jobs: WorkerJob[]): void
-    {
+    private getActionFromFilename(filename: string): string {
+        if (filename.includes("hack")) {
+            return "hack";
+        }
 
+        if (filename.includes("grow")) {
+            return "grow";
+        }
+
+        if (filename.includes("weaken")) {
+            return "weaken";
+        }
+
+        return "other";
     }
 
-    private reportActions(jobs: WorkerJob[]): void
-    {
-
-    }
-
-    private reportWorkers(servers: ServerInfo[]): void
-    {
-
-    }
-
-    private reportStaleWorkers(servers: ServerInfo[], jobs: WorkerJob[]): void
-    {
-
-    }
-
-    private printSection(section: string): void
-    {
-        this.context.ns.tprint(section);
-    }
-
-    private print(message: string): void
+    private print(message: string): void 
     {
         this.context.ns.tprint(message);
     }
 
-    public oldStuf(servers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[])
+    private printSection(title: string): void 
     {
-        const ns = this.context.ns;
-        
-
-    
-    ns.tprint("========== JOBS ==========");
-    const workerDistribution = new Map<string, number>();
-    for (const job of jobs) {
-      workerDistribution.set(
-        job.target,
-        (workerDistribution.get(job.target) ?? 0) + 1
-      );
-    }
-    for (const [target, count] of workerDistribution) {
-      ns.tprint(`${target}: ${count}`);
+        this.print("");
+        this.print(`===== ${title.toUpperCase()} =====`);
     }
 
-    ns.tprint("========== RAM ==========");
-    const ramDistribution = new Map<string, number>();
-    for (const job of jobs) {
-      ramDistribution.set(
-        job.target,
-        (ramDistribution.get(job.target) ?? 0) + job.allocatedRam
-      );
-    }
-    for (const [target, count] of ramDistribution) {
-      ns.tprint(`${target}: ${count}`);
-    }
-
-    const hackRam = new Map<string, number>();
-    const hackThreads = new Map<string, number>();
-
-    for (const job of jobs) {
-      if (job.action !== "hack") continue;
-
-      hackRam.set(
-        job.target,
-        (hackRam.get(job.target) ?? 0) + job.allocatedRam
-      );
-
-      hackThreads.set(
-        job.target,
-        (hackThreads.get(job.target) ?? 0) + job.threads
-      );
-    }
-
-    ns.tprint("======== HACK ========");
-
-    for (const [target, ram] of hackRam) {
-      const threads = hackThreads.get(target) ?? 0;
-
-      ns.tprint(
-        `${target}: ${threads} threads | ${ram} GB`
-      );
-    }
-
-    const actions = new Map<string, number>();
-    ns.tprint("======== ACTIONS ========");
-    for (const job of jobs) {
-      const key = `${job.target}:${job.action}`;
-      actions.set(key, (actions.get(key) ?? 0) + 1);
-    }
-
-    for (const [key, count] of actions) {
-      ns.tprint(`${key}: ${count}`);
-    }
-
-    ns.tprint("======== WORKERS ========");
-    let runningProcesses = 0;
-    for (const worker of servers) {
-      if (worker.hostname === "home" || !worker.rooted) continue;
-      const processes = ns.ps(worker.hostname);
-
-      if (processes.length === 0) {
-        ns.tprint(`${worker.hostname}: idle`);
-
-        continue;
-      }
-
-      for (const process of processes) {
-        ns.tprint(`${worker.hostname}: ` + `${process.filename} ` + `${process.args.join(",")}`);
-      }
-      runningProcesses += processes.length;
-    }
-
-    ns.tprint(`Running Processes: ${runningProcesses}`);
-
-    ns.tprint(
-      `Jobs=${jobs.length}`
-    );
-
-    const usedHosts = new Set(jobs.map(job => job.hostname));
-
-    let staleWorkers = 0;
-
-    for (const worker of servers) {
-      if (worker.hostname === "home" || !worker.rooted) continue;
-
-      if (!usedHosts.has(worker.hostname) && ns.ps(worker.hostname).length > 0) {
-        ns.tprint(`[STALE] ${worker.hostname}`);
-        staleWorkers++;
-      }
-    }
-
-    ns.tprint(`Stale workers: ${staleWorkers}`);
+    private printTable(table: Table): void 
+    {
+        for (const line of table.render()) {
+        this.print(line);
+        }
     }
 }
