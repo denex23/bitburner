@@ -1,6 +1,6 @@
-import { Context } from '/src/models/context';
-import { ServerInfo } from "/src/models/server-info"
-import { RootResult } from "/src/models/root-result"
+import { Context } from 'src/models/context';
+import { ServerInfo } from "src/models/server-info"
+import { RootResult } from "src/models/root-result"
 
 export class Rooter 
 {

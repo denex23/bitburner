@@ -1,10 +1,10 @@
-import { Context } from '/src/models/context';
-import { ServerInfo } from "/src/models/server-info";
-import { TargetInfo } from "/src/models/target-info";
-import { WorkerJob } from "/src/models/worker-job";
-import { WorkerAction } from "/src/utils/constants";
-import { TARGET_ACTION } from "/src/utils/constants";
-import { SCRIPT_RAM } from '/src/utils/constants';
+import { Context } from 'src/models/context';
+import { ServerInfo } from "src/models/server-info";
+import { TargetInfo } from "src/models/target-info";
+import { WorkerJob } from "src/models/worker-job";
+import { WorkerAction } from "src/utils/constants";
+import { TARGET_ACTION } from "src/utils/constants";
+import { SCRIPT_RAM } from 'src/utils/constants';
 
 export class Allocator 
 {

@@ -1,7 +1,7 @@
-import { Context } from '/src/models/context';
-import { ServerInfo } from "/src/models/server-info";
-import { WorkerJob } from "/src/models/worker-job";
-import { SCRIPT_MAP } from '/src/utils/constants';
+import { Context } from 'src/models/context';
+import { ServerInfo } from "src/models/server-info";
+import { WorkerJob } from "src/models/worker-job";
+import { SCRIPT_MAP } from 'src/utils/constants';
 
 export class Deployer 
 {

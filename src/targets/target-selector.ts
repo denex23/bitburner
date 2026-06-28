@@ -1,9 +1,9 @@
-import { Context } from "/src/models/context"
-import { ServerInfo } from "/src/models/server-info"
-import { TargetInfo } from "/src/models/target-info"
-import { calculateScore } from "/src/targets/target-score"
-import { TargetState } from '/src/utils/constants';
-import { STATE_WEIGHT } from "/src/utils/constants"
+import { Context } from "src/models/context"
+import { ServerInfo } from "src/models/server-info"
+import { TargetInfo } from "src/models/target-info"
+import { calculateScore } from "src/targets/target-score"
+import { TargetState } from 'src/utils/constants';
+import { STATE_WEIGHT } from "src/utils/constants"
 import { calculateMoneyRatio, calculateSecurityDelta } from "/src/utils/calculation-helper"
 
 export class TargetSelector 

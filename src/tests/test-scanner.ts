@@ -1,6 +1,6 @@
 import { NS } from '@ns';
-import { Context } from "/src/models/context";
-import { Scanner } from "/src/network/scanner";
+import { Context } from "src/models/context";
+import { Scanner } from "src/network/scanner";
 
 export async function main(ns: NS) 
 {

@@ -1,4 +1,4 @@
-import { WorkerAction } from "/src/utils/constants";
+import { WorkerAction } from "src/utils/constants";
 
 export interface WorkerJob 
 {
