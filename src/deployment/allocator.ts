@@ -99,7 +99,7 @@ export class Allocator
 
     private createJob(worker: ServerInfo, target: string, action: WorkerAction): WorkerJob 
     {
-        const threads = Math.floor(worker.maxRam / SCRIPT_RAM[action]);
+        const threads = this.calculateThreads(worker.maxRam, target, action);
 
         return {
             hostname: worker.hostname,
@@ -108,5 +108,26 @@ export class Allocator
             threads,
             allocatedRam: worker.maxRam,
         };
+    }
+
+    private calculateThreads(workerRam: number, target: string, action: WorkerAction): number {
+        const maxThreads = Math.floor(workerRam / SCRIPT_RAM[action]);
+
+        if (action !== WorkerAction.Hack) {
+            return maxThreads;
+        }
+
+        return Math.min(maxThreads, this.calculateHackThreads(target));
+    }
+
+    private calculateHackThreads(target: string): number {
+        const hackPercentage = this.context.ns.hackAnalyze(target);
+        const moneyToHack = 0.1;
+
+        if (hackPercentage <= 0) {
+            return 0;
+        }
+
+        return Math.max(1, Math.floor(moneyToHack / hackPercentage));
     }
 }
