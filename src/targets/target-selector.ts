@@ -4,7 +4,7 @@ import { TargetInfo } from "src/models/target-info"
 import { calculateScore } from "src/targets/target-score"
 import { TargetState } from 'src/utils/constants';
 import { STATE_WEIGHT } from "src/utils/constants"
-import { calculateMoneyRatio, calculateSecurityDelta } from "/src/utils/calculation-helper"
+import { calculateMoneyRatio, calculateSecurityDelta, calculateSecurityRatio } from "/src/utils/calculation-helper"
 
 export class TargetSelector 
 {
@@ -65,16 +65,26 @@ export class TargetSelector
 
     private calculatePriority(server: ServerInfo, score: number, state: TargetState): number 
     {
-        const moneyDeficit = 1 - calculateMoneyRatio(server);
-        const securityDelta = calculateSecurityDelta(server);
-        
-        switch (state) {
-        case TargetState.Weaken:
-            return score * (securityDelta / 10);
-        case TargetState.Grow:
-            return score * moneyDeficit;
-        case TargetState.Farm:
-            return score;
+        if (TargetState.Weaken === state) {
+            return this.calculateWeakenPriority(server, score, STATE_WEIGHT[state]);
         }
+
+        if (TargetState.Grow === state) {
+            return this.calculateGrowPriority(server, score, STATE_WEIGHT[state]);
+        }
+
+        return score * STATE_WEIGHT[state];
+    }
+
+    private calculateWeakenPriority(server: ServerInfo, score: number, stateWeight: number): number
+    {
+        return score * stateWeight * calculateSecurityRatio(server);
+    }
+
+    private calculateGrowPriority(server: ServerInfo, score: number, stateWeight: number): number 
+    {
+        const moneyDeficit = Math.max(0, (1 - calculateMoneyRatio(server)));
+
+        return score * stateWeight * moneyDeficit * calculateSecurityRatio(server);
     }
 }
