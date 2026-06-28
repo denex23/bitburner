@@ -30,7 +30,7 @@ export async function main(ns: NS)
         debugReporter.report(servers, targets, jobs);
 
         // Refresh server/worker
-        deployer.deploy(servers, jobs);
+        await deployer.deploy(servers, jobs);
 
         await ns.sleep(60000);
     }

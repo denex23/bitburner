@@ -9,7 +9,6 @@ export class Deployer
 
     public async deploy(servers: ServerInfo[], jobs: WorkerJob[]): Promise<void> 
     {
-        const {ns} = this.context;
         const usedHosts = new Set(jobs.map(job => job.hostname));
         const workers = servers.filter(server =>
             server.rooted &&
@@ -19,21 +18,29 @@ export class Deployer
 
         for (const worker of workers) {
             if (!usedHosts.has(worker.hostname)) {
-                ns.killall(worker.hostname);
+                this.context.ns.killall(worker.hostname);
             }
         }
 
         for (const job of jobs) {
-            this.deployJob(job);
+            await this.deployJob(job);
         }
     }
 
-    private deployJob(job: WorkerJob): void 
+    private async deployJob(job: WorkerJob): Promise<void> 
     {
-        const {ns} = this.context;
+        const ns = this.context.ns;
+
         const processes = ns.ps(job.hostname);
         const script = SCRIPT_MAP[job.action];
         const desiredArgs = [job.target];
+
+        if (!ns.fileExists(script, "home")) {
+            ns.tprint(`[SCRIPT MISSING] ${script}`);
+            
+            return;
+        }
+
         const existing = processes.find(process =>
             process.filename === script &&
             JSON.stringify(process.args) === JSON.stringify(desiredArgs)
@@ -44,7 +51,7 @@ export class Deployer
         }
 
         ns.killall(job.hostname);
-        ns.scp(script, job.hostname);
+        await ns.scp(script, job.hostname);
 
         const pid = ns.exec(
             script,
@@ -52,5 +59,17 @@ export class Deployer
             job.threads,
             job.target
         );
+
+        if (pid === 0) {
+            ns.tprint(
+                `[DEPLOY FAILED] ${job.hostname} -> ${script} ${job.target} ` +
+                `threads=${job.threads} ` +
+                `fileHome=${ns.fileExists(script, "home")} ` +
+                `fileWorker=${ns.fileExists(script, job.hostname)} ` +
+                `scriptRam=${ns.getScriptRam(script)} ` +
+                `workerRam=${ns.getServerMaxRam(job.hostname)} ` +
+                `needed=${job.threads * ns.getScriptRam(script)}`
+            );
+        }
     }
 }
