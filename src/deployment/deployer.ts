@@ -52,7 +52,8 @@ export class Deployer
                 `fileWorker=${ns.fileExists(script, job.hostname)} ` +
                 `scriptRam=${ns.getScriptRam(script)} ` +
                 `workerRam=${ns.getServerMaxRam(job.hostname)} ` +
-                `needed=${job.threads * ns.getScriptRam(script)}`
+                `needed=${job.threads * ns.getScriptRam(script)}` +
+                `freeRam=${ns.getServerMaxRam(job.hostname) - ns.getServerUsedRam(job.hostname)} `
             );
         }
     }
@@ -68,19 +69,20 @@ export class Deployer
     private createDesiredJobKeys(jobs: WorkerJob[]): Set<string> 
     {
         return new Set(jobs.map(job => 
-            this.createJobKey(job.hostname, SCRIPT_MAP[job.action], job.target)
+            this.createJobKey(job.hostname, SCRIPT_MAP[job.action], job.target, job.threads)
         ));
     }
 
-    private createJobKey(hostname: string, script: string, target: string): string 
+    private createJobKey(hostname: string, script: string, target: string, threads: number): string 
     {
-        return `${hostname}|${script}|${target}`;
+        return `${hostname}|${script}|${target}|${threads}`;
     }
 
     private isJobRunning(job: WorkerJob, script: string): boolean 
     {
         return this.context.ns.ps(job.hostname).some(process =>
             process.filename === script &&
+            process.threads === job.threads &&
             String(process.args[0] ?? "") === job.target
         );
     }
@@ -89,7 +91,7 @@ export class Deployer
     {
         for (const process of this.context.ns.ps(worker.hostname)) {
             const target = String(process.args[0] ?? "");
-            const jobKey = this.createJobKey(worker.hostname, process.filename, target);
+            const jobKey = this.createJobKey(worker.hostname, process.filename, target, process.threads);
 
             if (!desiredJobs.has(jobKey)) {
                 this.context.ns.kill(process.pid);
