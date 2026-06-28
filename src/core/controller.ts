@@ -5,6 +5,7 @@ import { Rooter } from "src/network/rooter";
 import { TargetSelector } from "src/targets/target-selector";
 import { Allocator } from "src/deployment/allocator";
 import { Deployer } from "src/deployment/deployer";
+import { DebugReporter } from 'src/debug/debug-reporter';
 
 export async function main(ns: NS) 
 {

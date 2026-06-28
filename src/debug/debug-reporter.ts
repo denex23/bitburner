@@ -1,6 +1,6 @@
 import { Alignment } from "src/debug/cell-alignment";
 import { AllocationRow } from "src/debug/reports/allocation-row";
-import { TargetRow } from "src/debug/reports/target-row";
+import { TargetRow } from "./reports/target-row";
 import { Table } from "src/debug/table";
 import { Context } from "src/models/context";
 import { ServerInfo } from "src/models/server-info";
@@ -235,10 +235,12 @@ export class DebugReporter
         this.context.ns.tprint(message);
     }
 
-    private printSection(title: string): void 
+    private printSection(title: string, withTimestamp: boolean = false): void 
     {
+        const timestamp = (withTimestamp) ? this.context.ns.format.time(Date.now()) : "";
+
         this.print("");
-        this.print(`===== ${title.toUpperCase()} =====`);
+        this.print(`===== ${title.toUpperCase()} ===== ${timestamp}`);
     }
 
     private printTable(table: Table): void 
