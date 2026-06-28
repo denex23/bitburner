@@ -26,11 +26,11 @@ export async function main(ns: NS)
         const targets = selector.select(servers);
         const jobs = allocator.allocate(servers, targets);
 
-        // Debugging
-        debugReporter.report(servers, targets, jobs);
-
         // Refresh server/worker
         await deployer.deploy(servers, jobs);
+
+        // Debugging
+        debugReporter.report(servers, targets, jobs);
 
         await ns.sleep(60000);
     }
