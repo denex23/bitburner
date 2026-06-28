@@ -13,6 +13,7 @@ export class DebugReporter
 
     public report(servers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[]): void
     {
+        this.print(this.context.ns.format.time(Date.now()));
         this.reportTargets(targets);
         this.reportAllocation(jobs);
         this.reportWorkers(servers);
@@ -235,18 +236,16 @@ export class DebugReporter
         this.context.ns.tprint(message);
     }
 
-    private printSection(title: string, withTimestamp: boolean = false): void 
+    private printSection(title: string): void 
     {
-        const timestamp = (withTimestamp) ? this.context.ns.format.time(Date.now()) : "";
-
         this.print("");
-        this.print(`===== ${title.toUpperCase()} ===== ${timestamp}`);
+        this.print(`===== ${title.toUpperCase()} =====`);
     }
 
     private printTable(table: Table): void 
     {
         for (const line of table.render()) {
-        this.print(line);
+            this.print(line);
         }
     }
 }

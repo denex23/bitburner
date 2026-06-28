@@ -26,10 +26,6 @@ export class Allocator
         let workerIndex = 0;
         workerIndex = this.allocateWork(workers, workTargets, jobs, workerIndex);
 
-        ns.tprint(
-            `WORK=${workerIndex}/${workers.length}`
-        );
-
         this.allocateFarm(workers, farmTargets, jobs, workerIndex);
 
         return jobs;
