@@ -16,6 +16,25 @@ export const WorkerAction = {
 
 export type WorkerAction = typeof WorkerAction[keyof typeof WorkerAction];
 
+// Define WorkerAction as const object
+export const CloudServer = {
+    Prefix: "cloud-server",
+    Count: 25,
+    Ram: 4096
+} as const;
+
+export type CloudServer = typeof CloudServer[keyof typeof CloudServer];
+
+export const RESERVED_HOME_RAM = 16;
+export const CONTROLLER_SCRIPT = "src/core/controller.js";
+
+export const FACTION_SERVERS = [
+    "CSEC",
+    "avmnite-02h",
+    "I.I.I.I",
+    "run4theh111z",
+];
+
 export const TARGET_ACTION: Record<TargetState, WorkerAction> = {
     [TargetState.Weaken]: WorkerAction.Weaken,
     [TargetState.Grow]: WorkerAction.Grow,
