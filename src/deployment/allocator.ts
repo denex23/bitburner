@@ -5,8 +5,9 @@ import { WorkerJob } from "src/models/worker-job";
 import { WorkerAction } from "src/utils/constants";
 import { TARGET_ACTION } from "src/utils/constants";
 import { SCRIPT_RAM } from 'src/utils/constants';
-import { calculateSecurityDelta } from 'src/utils/calculation-helper';
+import { calculateSecurityDelta} from 'src/utils/calculation-helper';
 import { WorkerAllocation } from 'src/models/worker-allocation';
+import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
 
 export class Allocator 
 {
@@ -33,18 +34,12 @@ export class Allocator
     private getWorkerAllocations(servers: ServerInfo[]): WorkerAllocation[]
     {
         return servers
-            .filter(server =>
-                server.rooted &&
-                server.maxRam > 0 &&
-                server.hostname !== "home"
-            )
-            .sort((a, b) =>
-                b.maxRam - a.maxRam
-            )
+            .filter(server => isWorkerServer(server) )
+            .sort((a, b) => b.maxRam - a.maxRam)
             .map<WorkerAllocation>(server => { 
                 return {
                     hostname: server.hostname,
-                    availableRam: server.maxRam
+                    availableRam: getWorkerRam(server)
                 };
             });
     }

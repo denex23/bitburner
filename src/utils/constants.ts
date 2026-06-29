@@ -11,7 +11,7 @@ export type TargetState = typeof TargetState[keyof typeof TargetState];
 export const WorkerAction = {
     Hack: "hack",
     Grow: "grow",
-    Weaken: "weaken"
+    Weaken: "weaken",
 } as const;
 
 export type WorkerAction = typeof WorkerAction[keyof typeof WorkerAction];
@@ -20,7 +20,7 @@ export type WorkerAction = typeof WorkerAction[keyof typeof WorkerAction];
 export const CloudServer = {
     Prefix: "cloud-server",
     Count: 25,
-    Ram: 4096
+    Ram: 4096,
 } as const;
 
 export type CloudServer = typeof CloudServer[keyof typeof CloudServer];

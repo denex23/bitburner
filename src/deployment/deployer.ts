@@ -2,6 +2,7 @@ import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info";
 import { WorkerJob } from "src/models/worker-job";
 import { SCRIPT_MAP } from 'src/utils/constants';
+import { isWorkerServer } from 'src/deployment/worker-helper';
 
 export class Deployer 
 {
@@ -58,12 +59,9 @@ export class Deployer
         }
     }
 
-    private getWorker(servers: ServerInfo[]): ServerInfo[] {
-        return servers.filter(server =>
-            server.rooted &&
-            server.maxRam > 0 &&
-            server.hostname !== "home"
-        );
+    private getWorker(servers: ServerInfo[]): ServerInfo[] 
+    {
+        return servers.filter(server => isWorkerServer(server));
     }
 
     private createDesiredJobKeys(jobs: WorkerJob[]): Set<string> 
@@ -90,6 +88,10 @@ export class Deployer
     private stopObsoleteProcesses(worker: ServerInfo, desiredJobs: Set<string>): void 
     {
         for (const process of this.context.ns.ps(worker.hostname)) {
+            if (!this.isWorkerScript(process.filename)) {
+                continue;
+            }
+            
             const target = String(process.args[0] ?? "");
             const jobKey = this.createJobKey(worker.hostname, process.filename, target, process.threads);
 
@@ -97,5 +99,10 @@ export class Deployer
                 this.context.ns.kill(process.pid);
             }
         }
+    }
+
+    private isWorkerScript(script: string): boolean
+    {
+        return Object.values(SCRIPT_MAP).includes(script);
     }
 }

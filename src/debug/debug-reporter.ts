@@ -134,7 +134,7 @@ export class DebugReporter
         let processes = 0;
 
         for (const server of servers) {
-            if (server.hostname === "home" || !server.rooted) {
+            if (!server.rooted) {
                 continue;
             }
 
@@ -184,7 +184,7 @@ export class DebugReporter
         const staleHosts: string[] = [];
 
         for (const server of servers) {
-            if (server.hostname === "home" || !server.rooted) {
+            if (!server.rooted) {
                 continue;
             }
 
