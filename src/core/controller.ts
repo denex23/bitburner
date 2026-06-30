@@ -45,7 +45,7 @@ export function initTail(ns: NS): void
     ns.disableLog("ALL");
     ns.ui.openTail();
     ns.ui.moveTail(60, 0);
-    ns.ui.resizeTail(800, 1275);
+    ns.ui.resizeTail(800, 1260);
     ns.ui.setTailMinimized(true);
     ns.atExit(() => { ns.ui.closeTail() });
 }
