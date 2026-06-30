@@ -17,6 +17,8 @@ export async function main(ns: NS)
     const allocator = new Allocator(context);
     const deployer = new Deployer(context);
 
+    initTail(ns);
+
     while (true) {
         // Scan & Rooting
         const servers = scanner.scan();
@@ -30,8 +32,20 @@ export async function main(ns: NS)
         await deployer.deploy(servers, jobs);
 
         // Debugging
+        ns.clearLog();
+        ns.ui.setTailTitle(`Reports - ${new Date().toLocaleString("de-DE")}`);
         debugReporter.report(servers, targets, jobs);
 
         await ns.sleep(60000);
     }
+}
+
+export function initTail(ns: NS): void
+{
+    ns.disableLog("ALL");
+    ns.ui.openTail();
+    ns.ui.moveTail(60, 0);
+    ns.ui.resizeTail(800, 1275);
+    ns.ui.setTailMinimized(true);
+    ns.atExit(() => { ns.ui.closeTail() });
 }

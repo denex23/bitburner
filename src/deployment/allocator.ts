@@ -5,8 +5,9 @@ import { WorkerJob } from "src/models/worker-job";
 import { WorkerAction } from "src/utils/constants";
 import { TARGET_ACTION } from "src/utils/constants";
 import { SCRIPT_RAM } from 'src/utils/constants';
-import { calculateSecurityDelta } from 'src/utils/calculation-helper';
+import { calculateSecurityDelta} from 'src/utils/calculation-helper';
 import { WorkerAllocation } from 'src/models/worker-allocation';
+import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
 
 export class Allocator 
 {
@@ -26,6 +27,7 @@ export class Allocator
 
         this.allocateWorker(workerAllocations, workTargets, jobs, farmTargets.length === 0);
         this.allocateWorker(workerAllocations, farmTargets, jobs);
+        this.allocateShare(workerAllocations, jobs);
 
         return jobs;
     }
@@ -33,18 +35,12 @@ export class Allocator
     private getWorkerAllocations(servers: ServerInfo[]): WorkerAllocation[]
     {
         return servers
-            .filter(server =>
-                server.rooted &&
-                server.maxRam > 0 &&
-                server.hostname !== "home"
-            )
-            .sort((a, b) =>
-                b.maxRam - a.maxRam
-            )
+            .filter(server => isWorkerServer(server) )
+            .sort((a, b) => b.maxRam - a.maxRam)
             .map<WorkerAllocation>(server => { 
                 return {
                     hostname: server.hostname,
-                    availableRam: server.maxRam
+                    availableRam: getWorkerRam(server)
                 };
             });
     }
@@ -115,6 +111,36 @@ export class Allocator
         return allocatedRam;
     }
 
+    private allocateShare(workers: WorkerAllocation[], jobs: WorkerJob[]): void
+    {
+        for (const worker of this.getAvailableWorkers(workers, WorkerAction.Share)) {
+            const threads = Math.floor(worker.availableRam / SCRIPT_RAM[WorkerAction.Share]);
+
+            if (threads <= 0) {
+                continue;
+            }
+
+            this.addShareJob(jobs, worker, threads);
+        }
+    }
+
+    private addShareJob(jobs: WorkerJob[], worker: WorkerAllocation, threads: number): number
+    {
+        const allocatedRam = threads * SCRIPT_RAM[WorkerAction.Share];
+
+        jobs.push({
+            hostname: worker.hostname,
+            target: "Share",
+            action: WorkerAction.Share,
+            threads,
+            allocatedRam,
+        });
+
+        worker.availableRam -= allocatedRam;
+
+        return allocatedRam;
+    }
+
     private getAvailableWorkers(workers: WorkerAllocation[], action: WorkerAction): WorkerAllocation[] {
         return workers
             .filter(worker => worker.availableRam >= SCRIPT_RAM[action])
@@ -143,7 +169,7 @@ export class Allocator
     private calculateHackThreads(target: TargetInfo): number 
     {
         const hackRatioPerThread = this.context.ns.hackAnalyze(target.hostname);
-        const targetHackRatio = 0.1;
+        const targetHackRatio = 0.2;
 
         if (hackRatioPerThread <= 0) {
             return 0;

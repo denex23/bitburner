@@ -13,7 +13,6 @@ export class DebugReporter
 
     public report(servers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[]): void
     {
-        this.printDate();
         this.reportTargets(targets);
         this.reportAllocation(jobs);
         this.reportWorkers(servers);
@@ -134,7 +133,7 @@ export class DebugReporter
         let processes = 0;
 
         for (const server of servers) {
-            if (server.hostname === "home" || !server.rooted) {
+            if (!server.rooted) {
                 continue;
             }
 
@@ -184,7 +183,7 @@ export class DebugReporter
         const staleHosts: string[] = [];
 
         for (const server of servers) {
-            if (server.hostname === "home" || !server.rooted) {
+            if (!server.rooted) {
                 continue;
             }
 
@@ -228,25 +227,21 @@ export class DebugReporter
             return "weaken";
         }
 
+        if (filename.includes("share")) {
+            return "share";
+        }
+
         return "other";
     }
 
     private print(message: string): void 
     {
-        this.context.ns.tprint(message);
-    }
-
-    private printDate(): void
-    {
-        const date = new Date(Date.now()); 
-        const locale: Intl.LocalesArgument = "de-DE";
-
-        this.print(date.toLocaleString(locale));
+        this.context.ns.print(message);
     }
 
     private printSection(title: string): void 
     {
-        this.print("");
+        this.print(" ");
         this.print(`===== ${title.toUpperCase()} =====`);
     }
 
