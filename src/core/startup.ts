@@ -1,5 +1,5 @@
 import { NS, ProgramName } from "@ns";
-import { CloudServer, CONTROLLER_SCRIPT, FACTION_SERVERS, RESERVED_HOME_RAM } from "src/utils/constants";
+import { CloudServer, CONTROLLER_SCRIPT, FACTION_SERVERS } from "src/utils/constants";
 
 export async function main(ns: NS): Promise<void>
 {
@@ -8,22 +8,37 @@ export async function main(ns: NS): Promise<void>
 
 async function runStartup(ns: NS): Promise<void>
 {
-    buyTorAndPrograms(ns);
-    buyCloudServers(ns);
-    await installFactionBackdoors(ns);
+    
     startController(ns);
+    if (0 < getSourceFileLevel(ns, 4)) {
+        await buyTorAndPrograms(ns);
+        await installFactionBackdoors(ns);
+    }
+
+    await buyCloudServers(ns);
 }
 
-function buyTorAndPrograms(ns: NS): void
+function getSourceFileLevel(ns: NS, sourceFile: number): number
+{
+    return ns.singularity.getOwnedSourceFiles().find(file => file.n === sourceFile)?.lvl ?? 0;
+}
+
+async function buyTorAndPrograms(ns: NS): Promise<void>
 {
     ns.singularity.purchaseTor();
 
-    for (const program of getTorPrograms(ns)) {
-        ns.singularity.purchaseProgram(program);
+    for (const program of getDarkwebProgramsNames(ns)) {
+        while (!ns.fileExists(program, "home")) {
+            if (ns.singularity.getDarkwebProgramCost(program) < ns.getServerMoneyAvailable()) {
+                ns.singularity.purchaseProgram(program);
+
+                ns.sleep(60000);
+            }
+        }
     }
 }
 
-function getTorPrograms(ns: NS): ProgramName[]
+function getDarkwebProgramsNames(ns: NS): ProgramName[]
 {
     return [
         ns.enums.ProgramName.bruteSsh,
@@ -34,21 +49,18 @@ function getTorPrograms(ns: NS): ProgramName[]
     ];
 }
 
-function buyCloudServers(ns: NS): void
+async function buyCloudServers(ns: NS): Promise<void>
 {
     for (let i = 0; i < CloudServer.Count; i++) {
         const hostname = `${CloudServer.Prefix}-${i}`;
 
-        if (ns.serverExists(hostname)) {
-            continue;
-        }
-        
+        while (!ns.serverExists(hostname)) {
+            if (ns.cloud.getServerCost(CloudServer.Ram) < ns.getServerMoneyAvailable("home")) {
+                return;
+            }
 
-        if (ns.cloud.getServerCost(CloudServer.Ram) > ns.getServerMoneyAvailable("home")) {
-            return;
+            ns.cloud.purchaseServer(hostname, CloudServer.Ram);
         }
-
-        ns.cloud.purchaseServer(hostname, CloudServer.Ram);
     }
 }
 
@@ -116,15 +128,6 @@ async function connectPath(ns: NS, path: string[]): Promise<void>
 function startController(ns: NS): void
 {
     if (ns.scriptRunning(CONTROLLER_SCRIPT, "home")) {
-        return;
-    }
-
-    const scriptRam = ns.getScriptRam(CONTROLLER_SCRIPT, "home");
-    const freeRam = ns.getServerMaxRam("home") - ns.getServerUsedRam("home");
-    const usableRam = freeRam - RESERVED_HOME_RAM;
-
-    if (usableRam < scriptRam) {
-        ns.tprint(`[STARTUP] Not enough reserved home RAM to start ${CONTROLLER_SCRIPT}`);
         return;
     }
 
