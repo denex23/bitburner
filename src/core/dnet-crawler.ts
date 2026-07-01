@@ -132,20 +132,21 @@ async function reportPassword(ns: NS, hostname: string, password: string): Promi
     await writePortReliable(ns, PASSWORD_PORT, JSON.stringify({ hostname, password }));
 }
 
-async function reportLog(ns: NS, message: string, context?: unknown): Promise<void>
+async function reportLog(ns: NS, message: string, context?: unknown, type?: string): Promise<void>
 {
-    await writePortReliable(ns, LOG_PORT, buildLogMessage(ns, message, context));
+    await writePortReliable(ns, LOG_PORT, buildLogMessage(ns, message, context, type));
 }
 
-function tryReportLog(ns: NS, message: string, context?: unknown): void
+function tryReportLog(ns: NS, message: string, context?: unknown, type?: string): void
 {
-    ns.tryWritePort(LOG_PORT, buildLogMessage(ns, message, context));
+    ns.tryWritePort(LOG_PORT, buildLogMessage(ns, message, context, type));
 }
 
-function buildLogMessage(ns: NS, message: string, context?: unknown): string
+function buildLogMessage(ns: NS, message: string, context?: unknown, type: string = ""): string
 {
     return JSON.stringify({
         host: ns.getHostname(),
+        type,
         message,
         context,
         time: Date.now(),
@@ -225,7 +226,7 @@ async function authenticateByModel(ns: NS, hostname: string, details: DarknetSer
         // TODO: get recent server logs with `await ns.dnet.heartbleed(hostname)` for more detailed logging on failed auth attempts
 
         default:
-            await reportLog(ns, "WARN Unknown Server Model", details);
+            await reportLog(ns, "Unknown Server Model", details, "WARN");
             return false;
     }
 }
@@ -246,16 +247,16 @@ async function authenticateDeskMemoServer(ns: NS, hostname:string, details: Dark
     const resultArr = details.passwordHint.match(new RegExp(`\\d\{${details.passwordLength}\}`, "g"));
 
     if (resultArr === null) {
-        reportLog(ns, "ERROR No password result in method authenticateDeskMemoServer()", details);
+        reportLog(ns, "No password result in method authenticateDeskMemoServer()", details, "ERROR");
 
         return false; // Error
     } else if (resultArr.length > 1) {
-        reportLog(ns, "INFO Suspicious password result in method authenticateDeskMemoServer()", { 
+        reportLog(ns, "Suspicious password result in method authenticateDeskMemoServer()", { 
             expectedLength: 1, 
             actualLength: resultArr.length, 
             data: resultArr, 
             details: details 
-        });
+        }, "INFO");
         
         return false;
     }
@@ -268,16 +269,16 @@ async function authenticateCloudBlareServer(ns: NS, hostname: string, details: D
     const resultArr = details.passwordHint.match(new RegExp("\\d", "g"));
 
     if (resultArr === null) {
-        reportLog(ns, "ERROR No password result in method authenticateCloudBlarePassword()", details);
+        reportLog(ns, "No password result in method authenticateCloudBlarePassword()", details, "ERROR");
 
         return false;
     } else if (resultArr.length !== details.passwordLength) {
-        reportLog(ns, "INFO Suspicious password result in method authenticateCloudBlarePassword()", { 
+        reportLog(ns, "Suspicious password result in method authenticateCloudBlarePassword()", { 
             expectedLength: 1, 
             actualLength: resultArr.length, 
             data: resultArr, 
             details: details 
-        });
+        }, "INFO");
         
         return false;
     }
