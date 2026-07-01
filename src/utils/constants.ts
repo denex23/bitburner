@@ -26,7 +26,7 @@ export const CloudServer = {
 
 export type CloudServer = typeof CloudServer[keyof typeof CloudServer];
 
-export const RESERVED_HOME_RAM = 64;
+export const RESERVED_HOME_RAM = 128;
 export const CONTROLLER_SCRIPT = "src/core/controller.ts";
 
 export const FACTION_SERVERS = [
