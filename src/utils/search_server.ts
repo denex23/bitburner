@@ -2,7 +2,7 @@ import { NS } from '@ns';
 
 export async function main(ns: NS): Promise<void>
 {
-    const target = "run4theh111z";
+    const target = String(ns.args.shift());
     const path = findPath(ns, "home", target);
 
     if (path.length === 0) {
