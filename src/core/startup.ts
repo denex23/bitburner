@@ -8,7 +8,6 @@ export async function main(ns: NS): Promise<void>
 
 async function runStartup(ns: NS): Promise<void>
 {
-    
     startController(ns);
     if (0 < getSourceFileLevel(ns, 4)) {
         await buyTorAndPrograms(ns);
@@ -53,12 +52,11 @@ async function buyCloudServers(ns: NS): Promise<void>
 {
     for (let i = 0; i < CloudServer.Count; i++) {
         const hostname = `${CloudServer.Prefix}-${i}`;
+        if (ns.serverExists(hostname)) {
+            continue;
+        }
 
-        while (!ns.serverExists(hostname)) {
-            if (ns.cloud.getServerCost(CloudServer.Ram) < ns.getServerMoneyAvailable("home")) {
-                return;
-            }
-
+        if (ns.cloud.getServerCost(CloudServer.Ram) < ns.getServerMoneyAvailable("home")) {
             ns.cloud.purchaseServer(hostname, CloudServer.Ram);
         }
     }
