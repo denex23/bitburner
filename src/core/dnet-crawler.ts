@@ -3,10 +3,12 @@ import { AutocompleteData, DarknetServerDetails, NS } from '@ns'
 const LOG_PORT = 24;
 const PASSWORD_PORT = 23;
 const PASSWORD_FILE = "src/data/dnet_passwords.json";
+const DNET_CONTROL_PORT = 25;
+const SHUTDOWN_COMMAND = "shutdown";
 
 export async function main(ns: NS)
 {
-    while (true) {
+    while (!shouldShutdown(ns)) {
         const nearbyServers = ns.dnet.probe();
 
         for (const hostname of nearbyServers) {
@@ -42,9 +44,6 @@ async function serverSolver(ns: NS, hostname: string): Promise<boolean>
     if (Object.hasOwn(passwords, hostname)) {
         const result = ns.dnet.connectToSession(hostname, passwords[hostname]);
 
-        // DEBUG
-        await reportLog(ns, "Result: connectToSession()", result);
-
         return result.success;
     }
 
@@ -57,21 +56,16 @@ async function reallocateRam(ns: NS, hostname: string): Promise<void>
     for (let attempts = 0; attempts < 10 && ns.dnet.getBlockedRam(hostname) > 0; attempts++) {
         const result = await ns.dnet.memoryReallocation(hostname);
 
-        // DEBUG
-        await reportLog(ns, "Result: memoryReallocation()", result);
-        if (!result.success) { // geändert
-            return; // geändert
+        if (!result.success) { 
+            return; 
         }
     }
 }
 
-async function infestTarget(ns: NS, hostname: string): Promise<void>
+function infestTarget(ns: NS, hostname: string): void
 {
-    await ns.scp(ns.getScriptName(), hostname);
-
-    ns.exec(ns.getScriptName(), hostname, {
-        preventDuplicates: true,
-    });
+    ns.scp(ns.getScriptName(), hostname);
+    ns.exec(ns.getScriptName(), hostname, { preventDuplicates: true });
 }
 
 async function runPhishingAttack(ns: NS): Promise<void>
@@ -79,18 +73,12 @@ async function runPhishingAttack(ns: NS): Promise<void>
     const result = await ns.dnet.phishingAttack();
 
     if (!result.success) {
-        // DEBUG - possible later ERROR log 
-        await reportLog(ns, "Result: phishingAttack()", result)
-
         return;
     }
 
     if (isCacheFile(result.message)) {
         handleCacheFile(ns, result.message);
     }
-
-    // DEBUG
-    await reportLog(ns, "Result: phishingAttack()", result)
 }
 
 function openLocalCacheFiles(ns: NS): void
@@ -105,19 +93,16 @@ function isCacheFile(filename: string): boolean
     return filename.endsWith(".cache");
 }
 
-async function handleCacheFile(ns: NS, file: string): Promise<void>
+function handleCacheFile(ns: NS, file: string): boolean
 {
-    const result = ns.dnet.openCache(file);
-
-    // DEBUG
-    await reportLog(ns, "Result: openCache()", result);
+    return ns.dnet.openCache(file).success;
 }
 
-async function loadKnownPasswords(ns: NS): Promise<Record<string, string>>
+function loadKnownPasswords(ns: NS): Record<string, string>
 {
     const host = ns.getHostname();
 
-    await ns.scp(PASSWORD_FILE, host, "home");
+    ns.scp(PASSWORD_FILE, host, "home");
 
 
     if (!ns.fileExists(PASSWORD_FILE, host)) {
@@ -134,18 +119,20 @@ async function reportPassword(ns: NS, hostname: string, password: string): Promi
 
 async function reportLog(ns: NS, message: string, context?: unknown, type?: string): Promise<void>
 {
-    await writePortReliable(ns, LOG_PORT, buildLogMessage(ns, message, context, type));
+    const payload = buildLogMessage(ns.getHostname(), message, context, type)
+    await writePortReliable(ns, LOG_PORT, payload);
 }
 
 function tryReportLog(ns: NS, message: string, context?: unknown, type?: string): void
 {
-    ns.tryWritePort(LOG_PORT, buildLogMessage(ns, message, context, type));
+    const payload:string = buildLogMessage(ns.getHostname(), message, context, type);
+    ns.tryWritePort(LOG_PORT, payload);
 }
 
-function buildLogMessage(ns: NS, message: string, context?: unknown, type: string = ""): string
+function buildLogMessage(host: string, message: string, context?: unknown, type: string = ""): string
 {
     return JSON.stringify({
-        host: ns.getHostname(),
+        host,
         type,
         message,
         context,
@@ -156,8 +143,13 @@ function buildLogMessage(ns: NS, message: string, context?: unknown, type: strin
 async function writePortReliable(ns: NS, port: number, payload: string): Promise<void>
 {
     while (!ns.tryWritePort(port, payload)) {
-        await ns.sleep(100);
+        await ns.sleep(500);
     }
+}
+
+function shouldShutdown(ns: NS): boolean
+{
+    return ns.peek(DNET_CONTROL_PORT) === SHUTDOWN_COMMAND;
 }
 
 async function authenticateByModel(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
@@ -226,7 +218,7 @@ async function authenticateByModel(ns: NS, hostname: string, details: DarknetSer
         // TODO: get recent server logs with `await ns.dnet.heartbleed(hostname)` for more detailed logging on failed auth attempts
 
         default:
-            await reportLog(ns, "Unknown Server Model", details, "WARN");
+            tryReportLog(ns, "Unknown Server Model", details, "WARN");
             return false;
     }
 }
@@ -247,11 +239,11 @@ async function authenticateDeskMemoServer(ns: NS, hostname:string, details: Dark
     const resultArr = details.passwordHint.match(new RegExp(`\\d\{${details.passwordLength}\}`, "g"));
 
     if (resultArr === null) {
-        reportLog(ns, "No password result in method authenticateDeskMemoServer()", details, "ERROR");
+        tryReportLog(ns, "No password result in method authenticateDeskMemoServer()", details, "ERROR");
 
-        return false; // Error
+        return false;
     } else if (resultArr.length > 1) {
-        reportLog(ns, "Suspicious password result in method authenticateDeskMemoServer()", { 
+        tryReportLog(ns, "Suspicious password result in method authenticateDeskMemoServer()", { 
             expectedLength: 1, 
             actualLength: resultArr.length, 
             data: resultArr, 
@@ -266,14 +258,14 @@ async function authenticateDeskMemoServer(ns: NS, hostname:string, details: Dark
 
 async function authenticateCloudBlareServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
 {
-    const resultArr = details.passwordHint.match(new RegExp("\\d", "g"));
+    const resultArr = details.data.match(new RegExp("\\d", "g"));
 
     if (resultArr === null) {
-        reportLog(ns, "No password result in method authenticateCloudBlarePassword()", details, "ERROR");
+        tryReportLog(ns, "No password result in method authenticateCloudBlarePassword()", details, "ERROR");
 
         return false;
     } else if (resultArr.length !== details.passwordLength) {
-        reportLog(ns, "Suspicious password result in method authenticateCloudBlarePassword()", { 
+        tryReportLog(ns, "Suspicious password result in method authenticateCloudBlarePassword()", { 
             expectedLength: 1, 
             actualLength: resultArr.length, 
             data: resultArr, 
