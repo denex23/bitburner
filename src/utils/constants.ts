@@ -36,6 +36,20 @@ export const FACTION_SERVERS = [
     "run4theh111z",
 ];
 
+export const CORPORATION_SERVERS = [
+    "fulcrumassets",
+    "fulcrumtech",
+    "ecorp",
+    "megacorp",
+    "4sigma", 
+    "kuai-gong",
+    "nwo",
+    "omnitek",
+    "blade",
+    "b-and-a",
+    "clarkinc",  
+]
+
 export const TARGET_ACTION: Record<TargetState, WorkerAction> = {
     [TargetState.Weaken]: WorkerAction.Weaken,
     [TargetState.Grow]: WorkerAction.Grow,
