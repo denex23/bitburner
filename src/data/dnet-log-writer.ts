@@ -1,7 +1,16 @@
 import { NS } from "@ns";
-import { LogEvent } from "src/models/log-event";
 
 const LOG_PORT = 24;
+const NULL_PORT_DATA = "NULL PORT DATA";
+
+export interface LogEvent
+{
+    host: string;
+    type?: string;
+    message: string;
+    context?: unknown;
+    time: number;
+}
 
 export async function main(ns: NS): Promise<void>
 {
@@ -10,14 +19,27 @@ export async function main(ns: NS): Promise<void>
     ns.ui.setTailTitle("Darknet Crawler");
 
     while (true) {
-        const raw = ns.readPort(LOG_PORT);
+        const processedMessages = handlePendingMessages(ns);
 
-        if (raw === "NULL PORT DATA") {
-            await ns.sleep(200);
-            continue;
+        if (0 === processedMessages) {
+            await ns.nextPortWrite(LOG_PORT);
+        }
+    }
+}
+
+function handlePendingMessages(ns: NS): number
+{
+    let processedMessages = 0;
+
+    while (true) {
+        const message = ns.readPort(LOG_PORT);
+
+        if (NULL_PORT_DATA === message) {
+            return processedMessages;
         }
 
-        const event = JSON.parse(String(raw)) as LogEvent;
+        processedMessages++;
+        const event = JSON.parse(String(message)) as LogEvent;
 
         ns.print(formatLogEvent(event));
     }

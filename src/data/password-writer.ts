@@ -2,6 +2,7 @@ import { NS } from "@ns";
 
 const PASSWORD_PORT = 23;
 const PASSWORD_FILE = "src/data/dnet_passwords.json";
+const NULL_PORT_DATA = "NULL PORT DATA";
 
 interface PasswordReport
 {
@@ -14,21 +15,11 @@ export async function main(ns: NS): Promise<void>
     const passwords = readPasswords(ns);
 
     while (true) {
-        const raw = ns.readPort(PASSWORD_PORT);
+        const processedMessages = handlePasswordMessages(ns, passwords);
 
-        if (raw === "NULL PORT DATA") {
-            await ns.sleep(1000);
-            continue;
+        if (0 === processedMessages) {
+            await ns.nextPortWrite(PASSWORD_PORT);
         }
-
-        const report = parseReport(raw);
-
-        if (report === null || report.hostname === "" || report.password === "") {
-            continue;
-        }
-
-        passwords[report.hostname] = report.password;
-        writePasswords(ns, passwords);
     }
 }
 
@@ -39,6 +30,33 @@ function readPasswords(ns: NS): Record<string, string>
     }
 
     return JSON.parse(ns.read(PASSWORD_FILE)) as Record<string, string>;
+}
+
+function handlePasswordMessages(ns: NS, passwords: Record<string, string>): number
+{
+    let processedMessages = 0;
+
+    while (true) {
+        const message = ns.readPort(PASSWORD_PORT);
+
+        if (NULL_PORT_DATA === message) {
+            return processedMessages;
+        }
+
+        processedMessages++;
+
+        handleReport(ns, parseReport(message), passwords); 
+    }
+}
+
+function handleReport(ns: NS, report: null|PasswordReport, passwords: Record<string, string>): void
+{
+    if (report === null || report.hostname === "" || report.password === "") {
+        return;
+    }
+
+    passwords[report.hostname] = report.password;
+    writePasswords(ns, passwords);
 }
 
 function writePasswords(ns: NS, passwords: Record<string, string>): void
