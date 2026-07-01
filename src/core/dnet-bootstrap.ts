@@ -1,8 +1,8 @@
 import { NS } from "@ns";
 
-const CRAWLER_SCRIPT = "src/core/darknet-crawler.js";
-const PASSWORD_WRITER = "src/data/password-writer.js";
-const LOG_WRITER = "src/data/darknet-log-writer.js";
+const CRAWLER_SCRIPT = "src/core/dnet-crawler.ts";
+const PASSWORD_WRITER = "src/data/password-writer.ts";
+const LOG_WRITER = "src/data/dnet-log-writer.ts";
 const ENTRY_SERVER = "darkweb";
 
 export async function main(ns: NS): Promise<void>

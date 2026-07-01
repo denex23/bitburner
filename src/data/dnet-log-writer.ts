@@ -19,6 +19,17 @@ export async function main(ns: NS): Promise<void>
 
         const event = JSON.parse(String(raw)) as LogEvent;
 
-        ns.print(`${event.type?.toUpperCase()} [${new Date(event.time).toLocaleTimeString("de-DE")}] ${event.host}: ${event.message} Context: ${event.context}`);
+        ns.print(formatLogEvent(event));
     }
+}
+
+function formatLogEvent(event: LogEvent): string
+{
+    const time = new Date(event.time).toLocaleTimeString("de-DE");
+
+    if (event.context === undefined) {
+        return `${event.type?.toUpperCase()} [${time}] ${event.host}: ${event.message}`;
+    }
+
+    return `${event.type?.toUpperCase()} [${time}] ${event.host}: ${event.message} ${JSON.stringify(event.context)}`;
 }
