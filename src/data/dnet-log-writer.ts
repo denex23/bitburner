@@ -17,6 +17,9 @@ export async function main(ns: NS): Promise<void>
     ns.disableLog("ALL");
     ns.ui.openTail();
     ns.ui.setTailTitle("Darknet Crawler");
+    ns.ui.moveTail(90, 10);
+    ns.ui.resizeTail(2000, 1000)
+    ns.ui.setTailMinimized(true);
 
     while (true) {
         const processedMessages = handlePendingMessages(ns);

@@ -29,6 +29,9 @@ export type CloudServer = typeof CloudServer[keyof typeof CloudServer];
 export const RESERVED_HOME_RAM = 128;
 export const CONTROLLER_SCRIPT = "src/core/controller.ts";
 
+export const PASSWORD_WRITER = "src/data/password-writer.ts";
+export const LOG_WRITER = "src/data/dnet-log-writer.ts";
+
 export const FACTION_SERVERS = [
     "CSEC",
     "avmnite-02h",
