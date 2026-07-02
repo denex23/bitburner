@@ -136,9 +136,6 @@ async function startPhishingAttack(ns: NS): Promise<void>
     if (isCacheFile(result.message)) {
         handleCacheFile(ns, result.message);
     }
-
-    // TODO Display only if not a cache. Atm i want to see the msg also it is a cache file
-    ns.toast(result.message, ns.enums.ToastVariant.SUCCESS);
 }
 
 async function scanFilesystem(ns: NS): Promise<void>
