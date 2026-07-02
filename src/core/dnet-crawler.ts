@@ -6,6 +6,22 @@ const PASSWORD_FILE = "src/data/dnet_passwords.json";
 const DNET_CONTROL_PORT = 25;
 const SHUTDOWN_COMMAND = "shutdown";
 
+const DNET_FILE_ARCHIVE_PORT = 26 
+
+const FILE_SUFFIX = {
+    Cache: ".cache",
+    Exe: ".exe",
+    Lit: ".lit",
+    Data: ".data.txt",
+} as const;
+
+type FILE_SUFFIX = typeof FILE_SUFFIX[keyof typeof FILE_SUFFIX];
+
+
+const LIT_BLACKLIST = new Set<string>([
+    // "some-trash.lit",
+]);
+
 export async function main(ns: NS)
 {
     while (!shouldShutdown(ns)) {
@@ -21,8 +37,8 @@ export async function main(ns: NS)
             await infestTarget(ns, hostname);
         }
 
-        openLocalCacheFiles(ns);
-        await runPhishingAttack(ns)
+        await scanFilesystem(ns);
+        await runPhishingAttack(ns);
         
         await ns.sleep(5000);
     }
@@ -79,23 +95,82 @@ async function runPhishingAttack(ns: NS): Promise<void>
     if (isCacheFile(result.message)) {
         handleCacheFile(ns, result.message);
     }
+
+    // TODO Display only if not a cache. Atm i want to see the msg also it is a cache file
+    ns.toast(result.message, ns.enums.ToastVariant.SUCCESS);
 }
 
-function openLocalCacheFiles(ns: NS): void
+async function scanFilesystem(ns: NS): Promise<void>
 {
-    for (const file of ns.ls(ns.getHostname()).filter(file => isCacheFile(file))) {
-        handleCacheFile(ns, file)
+    for (const file of ns.ls(ns.getHostname())) {
+        if (isCacheFile(file)) {
+            handleCacheFile(ns, file);
+            continue;
+        }
+
+        if (isExecuteable(file)) {
+            handleExecuteable(ns, file);
+            continue
+        }
+
+        if (isLiteratureFile(file)) {
+            handleLiteratureFile(ns, file);
+            continue
+        }
+
+        if (isTextFile(file)) {
+            await handleTextFile(ns, file);
+            continue
+        }
     }
 }
 
 function isCacheFile(filename: string): boolean
 {
-    return filename.endsWith(".cache");
+    return filename.endsWith(FILE_SUFFIX.Cache);
+}
+
+function isExecuteable(filename: string): boolean
+{
+    return filename.endsWith(FILE_SUFFIX.Exe);
+}
+
+function isLiteratureFile(filename: string): boolean
+{
+    return filename.endsWith(FILE_SUFFIX.Lit);
+}
+
+function isTextFile(filename: string): boolean
+{
+    return filename.endsWith(FILE_SUFFIX.Data);
 }
 
 function handleCacheFile(ns: NS, file: string): boolean
 {
     return ns.dnet.openCache(file).success;
+}
+
+function handleExecuteable(ns: NS, file: string): boolean
+{
+    return ns.run(file, 1) !== 0;
+}
+
+function handleLiteratureFile(ns: NS, file: string): boolean
+{
+    if (LIT_BLACKLIST.has(file) || ns.fileExists(file, "home")) {
+        return false;
+    }
+
+    return ns.scp(file, "home");
+}
+
+function handleTextFile(ns: NS, file: string): Promise<void>
+{
+    return writePortReliable(ns, DNET_FILE_ARCHIVE_PORT, JSON.stringify({
+        filename: file, 
+        content: ns.read(file), 
+        createdAt: Date.now(),
+    }));
 }
 
 function loadKnownPasswords(ns: NS): Record<string, string>
@@ -174,11 +249,10 @@ async function authenticateByModel(ns: NS, hostname: string, details: DarknetSer
             return authenticateProverServer(ns, hostname, details);
 
         case "Factori-Os":
-            //return authenticateFactoriOsPassword(ns, hostname, details);
-        // Hint: The password is divisible by 1 ;) numeric | see hint it says which numbers are divisors and heartbleed mentioed digits
-        // Response.message: Password is not divisible by '15'
+            return authenticateFactoriOsServer(ns, hostname, details);
 
         case "AccountsManager_4.2":
+            return authenticateAccountsManagerServer(ns, hostname, details);
         // binary search tree
         // Hint: The password is a number between 0 and 100
         // response.data: Higher|Lower
@@ -206,6 +280,9 @@ async function authenticateByModel(ns: NS, hostname: string, details: DarknetSer
 
         case "FreshInstall_1.0":
             // Default Password ??? numeric
+            // length: 5, numeric -> 12345
+            // lenght: 8, alphabetic -> password
+            // lenght: 5, alphabetic -> admin
 
         case "Laika4":
             // Casual password hint. alphabetic
@@ -236,6 +313,7 @@ async function authenticate(ns: NS, hostname: string, password: string): Promise
 
 async function authenticateDeskMemoServer(ns: NS, hostname:string, details: DarknetServerDetails): Promise<boolean>
 {
+    // The numeric password is always at the end of the hint/response message
     const resultArr = details.passwordHint.match(new RegExp(`\\d\{${details.passwordLength}\}`, "g"));
 
     if (resultArr === null) {
@@ -256,8 +334,10 @@ async function authenticateDeskMemoServer(ns: NS, hostname:string, details: Dark
     return authenticate(ns, hostname, resultArr.shift()!);
 };
 
+
 async function authenticateCloudBlareServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
 {
+    // The numeric password is always 'hidden' in the hint/respnse data e.g. #$5-.7*§4!_?
     const resultArr = details.data.match(new RegExp("\\d", "g"));
 
     if (resultArr === null) {
@@ -280,6 +360,7 @@ async function authenticateCloudBlareServer(ns: NS, hostname: string, details: D
 
 async function authenticatePHPServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
 {
+    // The password is shuffled in the hint/response data.
     for (const value of uniquePermutation(details.data)) {
         if ((await authenticate(ns, hostname, value)).valueOf()) {
             return true;
@@ -291,6 +372,7 @@ async function authenticatePHPServer(ns: NS, hostname: string, details: DarknetS
 
 async function authenticateOctantVoxelServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
 {
+    // The hint/response data contains a number and its base. The password is the representation of this number in the decimal system.
     const [baseValue, value] = details.data.split(",");
     const base = Number(baseValue);
 
@@ -303,6 +385,8 @@ async function authenticateOctantVoxelServer(ns: NS, hostname: string, details: 
 
 async function authenticateProverServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
 {
+    // The hint/response data contains the buffer length. The Password can be everthing as long as it is a string which is twice as long as the buffer
+    // and the first half is identical to the second half e.g. 'abcdeabcde' by a buffer lenght of 5 
     const buffer = Number(details.data);
 
     return authenticate(ns, hostname, "a".repeat(buffer * 2));
@@ -310,8 +394,7 @@ async function authenticateProverServer(ns: NS, hostname: string, details: Darkn
 
 async function authenticateFactoriOsServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
 {
-    return false;
-
+    // The reponse data contains true or false and indicates whether the password is divisible by the entered number or not.
     let candidates = createCandidates(details.passwordLength);
 
     while (candidates.length > 0) {
@@ -326,12 +409,14 @@ async function authenticateFactoriOsServer(ns: NS, hostname: string, details: Da
             return true;
         }
 
+
         if (result.success === false) {
             const recentLogResult = await ns.dnet.heartbleed(hostname, { peek: true });
+            recentLogResult.logs
             ns.print(recentLogResult.logs);
-          }
+        }
 
-        const isDivisible = result.message.includes("is|is not divisible"); // forgot to note the message -.-
+        const isDivisible = result.data;
         candidates = filterCandidates(candidates, divisor, isDivisible);
     }
 
@@ -341,11 +426,41 @@ async function authenticateFactoriOsServer(ns: NS, hostname: string, details: Da
 async function authenticateDeepGreenServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
 {
     return false;
-    // Mastermind game - numeric - hints in heartbleed -> date n,m - where n = How many symbols match exactly and m = How many symbols match but are in wrong place, heartbleed mentioed digits
+    // It's a Mastermind game. The response data contais <exactly matches>,<symbol match but wrong position>
     // await ns.dnet.heartbleed(hostname)
     for (let i = 0; i < 10; i++) {
         let password: string = `${i}`.repeat(details.passwordLength);
         const result = await ns.dnet.authenticate(hostname, password);
+    }
+
+    return false;
+}
+
+async function authenticateAccountsManagerServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
+{
+    let candidates = createCandidates(details.passwordLength);
+
+    while (candidates.length > 0) {
+        const divisor = candidates.length === 1
+            ? candidates[0]
+            : findBestDivisor(candidates);
+
+        const result = await ns.dnet.authenticate(hostname, String(divisor));
+
+        if (result.success) {
+            await reportPassword(ns, hostname, String(divisor));
+            return true;
+        }
+
+
+        if (result.success === false) {
+            const recentLogResult = await ns.dnet.heartbleed(hostname, { peek: true });
+            recentLogResult.logs
+            ns.print(recentLogResult.logs);
+        }
+
+        const isDivisible = result.data;
+        candidates = filterCandidates(candidates, divisor, isDivisible);
     }
 
     return false;

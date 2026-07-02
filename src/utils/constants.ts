@@ -31,6 +31,7 @@ export const CONTROLLER_SCRIPT = "src/core/controller.ts";
 
 export const PASSWORD_WRITER = "src/data/password-writer.ts";
 export const LOG_WRITER = "src/data/dnet-log-writer.ts";
+export const TXT_WRITER = "src/data/dnet-txt-writer.ts";
 
 export const FACTION_SERVERS = [
     "CSEC",
