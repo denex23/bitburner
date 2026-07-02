@@ -34,17 +34,17 @@ function handlePendingMessages(ns: NS): number
         }
 
         processedMessages++;
-        const fielMessage = JSON.parse(String(message)) as DnetFileArchiveMessage;
+        const fileMessage = JSON.parse(String(message)) as DnetFileArchiveMessage;
 
-        mergeDataFile(ns, fielMessage);
+        mergeDataFile(ns, fileMessage);
     }
 }
 
 function mergeDataFile(ns: NS, fileMessage: DnetFileArchiveMessage): void
 {
     const localFile = `${ARCHIVE_DIR}${fileMessage.filename}`;
-    const sourceContent = ns.read(fileMessage.content).trim();
-
+    const sourceContent = fileMessage.content.trim();
+    
     if ("" === sourceContent) {
         return;
     }

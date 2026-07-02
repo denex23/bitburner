@@ -1,5 +1,5 @@
 import { NS } from "@ns";
-import { PASSWORD_WRITER, LOG_WRITER, TXT_WRITER } from "../utils/constants";
+import { PASSWORD_WRITER, LOG_WRITER, TXT_WRITER } from "src/utils/constants";
 
 const CRAWLER_SCRIPT = "src/core/dnet-crawler.ts";
 const ENTRY_SERVER = "darkweb";
