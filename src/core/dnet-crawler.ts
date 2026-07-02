@@ -2,24 +2,65 @@ import { AutocompleteData, DarknetServerDetails, NS } from '@ns'
 
 const LOG_PORT = 24;
 const PASSWORD_PORT = 23;
-const PASSWORD_FILE = "src/data/dnet_passwords.json";
 const DNET_CONTROL_PORT = 25;
-const SHUTDOWN_COMMAND = "shutdown";
+const FILE_ARCHIVE_PORT = 26
 
-const DNET_FILE_ARCHIVE_PORT = 26 
+const PASSWORD_FILE = "src/data/dnet_passwords.json";
+
+const SHUTDOWN_COMMAND = "shutdown";
+ 
+const STORM_SEED_FILENAME = "STORM_SEED.exe"
 
 const FILE_SUFFIX = {
     Cache: ".cache",
-    Exe: ".exe",
     Lit: ".lit",
     Data: ".data.txt",
 } as const;
 
-type FILE_SUFFIX = typeof FILE_SUFFIX[keyof typeof FILE_SUFFIX];
+const LAIKA_PASSWORDS = [
+    "fido",
+    "spot",
+    "rover",
+    "max",
+] as const;
 
+const FRESH_INSTALL_PASSWORDS: Record<string, string> = {
+    "numeric:4": "0000",
+    "numeric:5": "12345",
+    "alphabetic:5": "admin",
+    "alphabetic:8": "password",
+} as const;
 
 const LIT_BLACKLIST = new Set<string>([
-    // "some-trash.lit",
+    "cache-note-1.lit",
+    "cache-note-2.lit",
+    "darkweb-rebooted-again.lit",
+    "dog-name-ideas.lit",
+    "factory-default.lit",
+    "hackers-starting-handbook.lit",
+    "raw-data.lit",
+    "secrets-in-the-depths.lit",
+    "server-offline-problem.lit",
+    "stasis-link.lit",
+    "timing-attack.lit",
+    "partial-password-jutsu.lit",
+]);
+
+const TXT_BLACKLIST = new Set<string>([
+    "THE_TRUTH.data.txt",
+    "access.data.txt",
+    "admin.data.txt",
+    "credentials.data.txt",
+    "dreams.data.txt",
+    "journal.data.txt",
+    "key.data.txt",
+    "login.data.txt",
+    "notes.data.txt",
+    "password.data.txt",
+    "root.data.txt",
+    "search_history.data.txt",
+    "secrets.data.txt",
+    "thoughts.data.txt",
 ]);
 
 export async function main(ns: NS)
@@ -38,7 +79,7 @@ export async function main(ns: NS)
         }
 
         await scanFilesystem(ns);
-        await runPhishingAttack(ns);
+        await startPhishingAttack(ns);
         
         await ns.sleep(5000);
     }
@@ -68,8 +109,8 @@ async function serverSolver(ns: NS, hostname: string): Promise<boolean>
 
 async function reallocateRam(ns: NS, hostname: string): Promise<void>
 {
-    // TODO: Check if attempts are sufficient
-    for (let attempts = 0; attempts < 10 && ns.dnet.getBlockedRam(hostname) > 0; attempts++) {
+    // TODO: Check if 10 tryCounts  are sufficient
+    for (let tryCount = 0; tryCount < 10 && ns.dnet.getBlockedRam(hostname) > 0; tryCount++) {
         const result = await ns.dnet.memoryReallocation(hostname);
 
         if (!result.success) { 
@@ -84,7 +125,7 @@ function infestTarget(ns: NS, hostname: string): void
     ns.exec(ns.getScriptName(), hostname, { preventDuplicates: true });
 }
 
-async function runPhishingAttack(ns: NS): Promise<void>
+async function startPhishingAttack(ns: NS): Promise<void>
 {
     const result = await ns.dnet.phishingAttack();
 
@@ -108,8 +149,8 @@ async function scanFilesystem(ns: NS): Promise<void>
             continue;
         }
 
-        if (isExecuteable(file)) {
-            handleExecuteable(ns, file);
+        if (isStormSeed(file)) {
+            //ns.dnet.unleashStormSeed();
             continue
         }
 
@@ -130,9 +171,9 @@ function isCacheFile(filename: string): boolean
     return filename.endsWith(FILE_SUFFIX.Cache);
 }
 
-function isExecuteable(filename: string): boolean
+function isStormSeed(filename: string): boolean
 {
-    return filename.endsWith(FILE_SUFFIX.Exe);
+    return filename === STORM_SEED_FILENAME;
 }
 
 function isLiteratureFile(filename: string): boolean
@@ -150,11 +191,6 @@ function handleCacheFile(ns: NS, file: string): boolean
     return ns.dnet.openCache(file).success;
 }
 
-function handleExecuteable(ns: NS, file: string): boolean
-{
-    return ns.run(file, 1) !== 0;
-}
-
 function handleLiteratureFile(ns: NS, file: string): boolean
 {
     if (LIT_BLACKLIST.has(file) || ns.fileExists(file, "home")) {
@@ -164,9 +200,13 @@ function handleLiteratureFile(ns: NS, file: string): boolean
     return ns.scp(file, "home");
 }
 
-function handleTextFile(ns: NS, file: string): Promise<void>
+async function handleTextFile(ns: NS, file: string): Promise<void>
 {
-    return writePortReliable(ns, DNET_FILE_ARCHIVE_PORT, JSON.stringify({
+    if (TXT_BLACKLIST.has(file)) {
+        return;
+    }
+
+    return writePortReliable(ns, FILE_ARCHIVE_PORT, JSON.stringify({
         filename: file, 
         content: ns.read(file), 
         createdAt: Date.now(),
@@ -253,46 +293,24 @@ async function authenticateByModel(ns: NS, hostname: string, details: DarknetSer
 
         case "AccountsManager_4.2":
             return authenticateAccountsManagerServer(ns, hostname, details);
-        // binary search tree
-        // Hint: The password is a number between 0 and 100
-        // response.data: Higher|Lower
 
         case "BellaCuore":
-        // Hint: The password is the value of the number 'CDXCI' -> 491
-        // Data: CDXCI
-        // Resolve roman numerals
-        // subtraction rule: I could be in front of V (IV = 4) and X (IX = 9), X could be on front of L (XL = 40) or C (XC = 90) and C could be in front of D (CD = 400) or M (CM = 900) 
-        // I = 1, V = 5, X = 10, L = 50, C = 100, D = 500, M = 1000,
+            return authenticateBellaCuoreServer(ns, hostname, details);
 
         case "NIL":
-        // Hint: you are one who's'nt authorized
-        // Response.message: that wasn't right
-        // data: yes,yesn't,yesn't,yesn't,yesn't
-        // data: yes,yes,yes,yesn't,yesn't
-        // -> something like Mastermind but it's enough to iterate with 11111 -> 99999 to get all positions
+            return authenticateNilServer(ns, hostname, details);
+
+        case "FreshInstall_1.0":
+            return authenticateFreshInstallServer(ns, hostname, details);
 
         case "DeepGreen":
             return authenticateDeepGreenServer(ns, hostname, details);
         
-        case "OpenWebAccessPoint":
-            // heartbleed mentioned clues
-            // heartblled shows full password "Logging in with passcode: 1914501 ..." - random?
-
-        case "FreshInstall_1.0":
-            // Default Password ??? numeric
-            // length: 5, numeric -> 12345
-            // lenght: 8, alphabetic -> password
-            // lenght: 5, alphabetic -> admin
-
         case "Laika4":
-            // Casual password hint. alphabetic
-            // Hint: It's my dog's name
+            return authenticateLaikaServer(ns, hostname, details);
 
-        
-
-        // TODO: handle other models of darknet servers here
-
-        // TODO: get recent server logs with `await ns.dnet.heartbleed(hostname)` for more detailed logging on failed auth attempts
+        case "OpenWebAccessPoint":
+            return authenticateOpenWebAccessPointServer(ns, hostname, details);
 
         default:
             tryReportLog(ns, "Unknown Server Model", details, "WARN");
@@ -317,11 +335,12 @@ async function authenticateDeskMemoServer(ns: NS, hostname:string, details: Dark
     const resultArr = details.passwordHint.match(new RegExp(`\\d\{${details.passwordLength}\}`, "g"));
 
     if (resultArr === null) {
-        tryReportLog(ns, "No password result in method authenticateDeskMemoServer()", details, "ERROR");
+        tryReportLog(ns, "No password result in method authenticateDeskMemoServer()", { targetHostname: hostname, details }, "ERROR");
 
         return false;
     } else if (resultArr.length > 1) {
         tryReportLog(ns, "Suspicious password result in method authenticateDeskMemoServer()", { 
+            targetHostname: hostname,
             expectedLength: 1, 
             actualLength: resultArr.length, 
             data: resultArr, 
@@ -341,11 +360,12 @@ async function authenticateCloudBlareServer(ns: NS, hostname: string, details: D
     const resultArr = details.data.match(new RegExp("\\d", "g"));
 
     if (resultArr === null) {
-        tryReportLog(ns, "No password result in method authenticateCloudBlarePassword()", details, "ERROR");
+        tryReportLog(ns, "No password result in method authenticateCloudBlarePassword()", { targetHostname: hostname, details }, "ERROR");
 
         return false;
     } else if (resultArr.length !== details.passwordLength) {
-        tryReportLog(ns, "Suspicious password result in method authenticateCloudBlarePassword()", { 
+        tryReportLog(ns, "Suspicious password result in method authenticateCloudBlarePassword()", {
+            targetHostname: hostname,
             expectedLength: 1, 
             actualLength: resultArr.length, 
             data: resultArr, 
@@ -425,12 +445,68 @@ async function authenticateFactoriOsServer(ns: NS, hostname: string, details: Da
 
 async function authenticateDeepGreenServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
 {
-    return false;
-    // It's a Mastermind game. The response data contais <exactly matches>,<symbol match but wrong position>
-    // await ns.dnet.heartbleed(hostname)
-    for (let i = 0; i < 10; i++) {
-        let password: string = `${i}`.repeat(details.passwordLength);
-        const result = await ns.dnet.authenticate(hostname, password);
+    // It's a Mastermind game. The response data contains <exactly matches>,<symbol match but wrong position>
+    const passwordDigits: string[] = [];
+
+    for (let digit = 0; digit <= 9; digit++) {
+        const candidate = String(digit).repeat(details.passwordLength);
+        const result = await ns.dnet.authenticate(hostname, candidate);
+
+        if (result.success) {
+            await reportPassword(ns, hostname, candidate);
+            return true;
+        }
+
+        const matches = parseDeepGreenMatches(result.data);
+
+        if (null === matches) {
+            tryReportLog(ns, "Unexpected response data in authenticateDeepGreenServer()", {
+                targetHostname: hostname,
+                passwordCandidate: candidate,
+                result,
+                details,
+            }, "ERROR");
+
+            return false;
+        }
+
+        const digitCount = matches.exact + matches.misplaced;
+
+        for (let count = 0; count < digitCount; count++) {
+            passwordDigits.push(String(digit));
+        }
+
+        if (passwordDigits.length === details.passwordLength) {
+            break;
+        }
+
+        if (passwordDigits.length > details.passwordLength) {
+            tryReportLog(ns, "Too many password digits found in authenticateDeepGreenServer()", {
+                targetHostname: hostname,
+                passwordCandidate: candidate,
+                passwordDigits,
+                result,
+                details,
+            }, "ERROR");
+
+            return false;
+        }
+    }
+
+    if (passwordDigits.length !== details.passwordLength) {
+        tryReportLog(ns, "Not enough password digits found in authenticateDeepGreenServer()", {
+            targetHostname: hostname,
+            passwordDigits,
+            details,
+        }, "ERROR");
+
+        return false;
+    }
+
+    for (const password of uniquePermutation(passwordDigits.join(""))) {
+        if (await authenticate(ns, hostname, password)) {
+            return true;
+        }
     }
 
     return false;
@@ -438,32 +514,289 @@ async function authenticateDeepGreenServer(ns: NS, hostname: string, details: Da
 
 async function authenticateAccountsManagerServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
 {
-    let candidates = createCandidates(details.passwordLength);
+    // It is a binary search. The Hint gives the min and max value. In the response the data field tells us if the pasword is 'Higher' oder 'Lower'
+    const range = extractPasswordRange(details);
 
-    while (candidates.length > 0) {
-        const divisor = candidates.length === 1
-            ? candidates[0]
-            : findBestDivisor(candidates);
+    if (null === range) {
+        tryReportLog(ns, "Could not extract password range in authenticateAccountsManagerServer()", { targetHostname: hostname, details }, "ERROR");
 
-        const result = await ns.dnet.authenticate(hostname, String(divisor));
+        return false;
+    }
+
+    let min = range.min;
+    let max = range.max;
+
+    while (min <= max) {
+        const password = String(Math.floor(min + ((max - min) / 2)));
+        const result = await ns.dnet.authenticate(hostname, password);
 
         if (result.success) {
-            await reportPassword(ns, hostname, String(divisor));
+            await reportPassword(ns, hostname, password);
+            
             return true;
         }
 
-
-        if (result.success === false) {
-            const recentLogResult = await ns.dnet.heartbleed(hostname, { peek: true });
-            recentLogResult.logs
-            ns.print(recentLogResult.logs);
+        if ("Higher" === result.data) {
+            min = Number(password) + 1;
+            continue;
         }
 
-        const isDivisible = result.data;
-        candidates = filterCandidates(candidates, divisor, isDivisible);
+        if ("Lower" === result.data) {
+            max = Number(password) - 1;
+            continue;
+        }
+
+        tryReportLog(ns, "Unexpected response data in authenticateAccountsManagerServer()", {
+            targetHostname: hostname,
+            password,
+            result,
+            details,
+        }, "ERROR");
+
+        return false;
     }
 
     return false;
+}
+
+async function authenticateBellaCuoreServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
+{
+    // In the data field is a roman numeral. The password is the numeral written in Arabic numerals.
+    const password = parseRomanNumeral(details.data);
+
+    if (null === password) {
+        tryReportLog(ns, "Could not parse roman numeral in authenticateBellaCuoreServer()", details, "ERROR");
+        return false;
+    }
+
+    return authenticate(ns, hostname, String(password));
+}
+
+function parseRomanNumeral(value: string): number | null
+{
+    const romanNumeralValues: Record<string, number> = {
+        IV: 4,
+        IX: 9,
+        XL: 40,
+        XC: 90,
+        CD: 400,
+        CM: 900,
+        I: 1,
+        V: 5,
+        X: 10,
+        L: 50,
+        C: 100,
+        D: 500,
+        M: 1000,
+    };
+
+    const tokens = value.match(/CM|CD|XC|XL|IX|IV|M|D|C|L|X|V|I/g);
+
+    if (null === tokens || tokens.join("") !== value) {
+        return null;
+    }
+
+    return tokens.reduce(
+        (sum, token) => sum + romanNumeralValues[token],
+        0,
+    );
+}
+
+async function authenticateNilServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
+{
+    // Trial and Error. The repsonse.data field tells us for every position if it has the correct "yes" number or not "yesn't"
+    const password = Array<string>(details.passwordLength).fill("");
+
+    for (let digit = 0; digit <= 9; digit++) {
+        const candidate = String(digit).repeat(details.passwordLength);
+        const result = await ns.dnet.authenticate(hostname, candidate);
+
+        if (result.success) {
+            await reportPassword(ns, hostname, candidate);
+
+            return true;
+        }
+
+        const matches = parseNilMatches(result.data, details.passwordLength);
+
+        if (null === matches) {
+            tryReportLog(ns, "Unexpected response data in authenticateNilServer()", {
+                targetHostname: hostname,
+                passwordCandidate: candidate,
+                result,
+                details,
+            }, "ERROR");
+
+            return false;
+        }
+
+        for (let index = 0; index < matches.length; index++) {
+            if ("yes" === matches[index]) {
+                password[index] = String(digit);
+            }
+        }
+
+        if (password.every(value => "" !== value)) {
+            return authenticate(ns, hostname, password.join(""));
+        }
+    }
+
+    return false;
+}
+
+async function authenticateLaikaServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
+{
+    for (const password of LAIKA_PASSWORDS) {
+        if (password.length !== details.passwordLength) {
+            continue;
+        }
+
+        if (await authenticate(ns, hostname, password)) {
+            return true;
+        }
+    }
+
+    tryReportLog(ns, "No matching Laika password found", {
+        targetHostname: hostname,
+        knownPasswords: LAIKA_PASSWORDS,
+        details,
+    }, "INFO");
+
+    return false;
+}
+
+async function authenticateOpenWebAccessPointServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
+{
+    const passwordCandidate = "0".repeat(details.passwordLength);
+    const result = await ns.dnet.authenticate(hostname, passwordCandidate);
+
+    if (result.success) {
+        await reportPassword(ns, hostname, passwordCandidate);
+        return true;
+    }
+
+    for (const password of extractOpenWebAccessPointPasswords(result.data, hostname, details.passwordLength)) {
+        if (await authenticate(ns, hostname, password)) {
+            return true;
+        }
+    }
+
+    tryReportLog(ns, "No hostname credential found in OpenWebAccessPoint response", {
+        targetHostname: hostname,
+        passwordCandidate,
+        result,
+        details,
+    }, "INFO");
+
+    return false;
+}
+
+function extractOpenWebAccessPointPasswords(data: unknown, hostname: string, passwordLength: number): string[]
+{
+    if ("string" !== typeof data) {
+        return [];
+    }
+
+    const escapedHostname = escapeRegExp(hostname);
+    const pattern = new RegExp(`${escapedHostname}:([a-zA-Z0-9]+)`, "g");
+    const passwords: string[] = [];
+
+    for (const result of data.matchAll(pattern)) {
+        if (result[1].length === passwordLength) {
+            passwords.push(result[1]);
+        }
+    }
+
+    return [...new Set(passwords)];
+}
+
+function escapeRegExp(value: string): string
+{
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseDeepGreenMatches(data: unknown): { exact: number, misplaced: number } | null
+{
+    if ("string" !== typeof data) {
+        return null;
+    }
+
+    const result = data.match(/(\d+)\s*,\s*(\d+)/);
+
+    if (null === result) {
+        return null;
+    }
+
+    const exact = Number(result[1]);
+    const misplaced = Number(result[2]);
+
+    if (!Number.isInteger(exact) || !Number.isInteger(misplaced)) {
+        return null;
+    }
+
+    return { exact, misplaced };
+}
+
+function parseNilMatches(data: unknown, expectedLength: number): string[] | null
+{
+    if ("string" !== typeof data) {
+        return null;
+    }
+
+    const matches = data
+        .split(",")
+        .map(value => value.trim());
+
+    if (matches.length !== expectedLength) {
+        return null;
+    }
+
+    return matches;
+}
+
+async function authenticateFreshInstallServer(ns: NS, hostname: string, details: DarknetServerDetails): Promise<boolean>
+{
+    const password = getFreshInstallPassword(details);
+
+    if (null === password) {
+        tryReportLog(ns, "Unknown FreshInstall_1.0 password combination", {
+            passwordFormat: details.passwordFormat,
+            passwordLength: details.passwordLength,
+            details,
+        }, "WARN");
+
+        return false;
+    }
+
+    return authenticate(ns, hostname, password);
+}
+
+function getFreshInstallPassword(details: DarknetServerDetails): string | null
+{
+    const key = `${details.passwordFormat}:${details.passwordLength}`;
+
+    return FRESH_INSTALL_PASSWORDS[key] ?? null;
+}
+
+function extractPasswordRange(details: DarknetServerDetails): { min: number, max: number } | null
+{
+    const result = details.passwordHint.match(/between\s+(-?\d+)\s+and\s+(-?\d+)/i);
+
+    if (null === result) {
+        return null;
+    }
+
+    const min = Number(result[1]);
+    const max = Number(result[2]);
+
+    if (!Number.isInteger(min) || !Number.isInteger(max)) {
+        return null;
+    }
+
+    return {
+        min: Math.min(min, max),
+        max: Math.max(min, max),
+    };
 }
 
 function createCandidates(length: number): number[]
