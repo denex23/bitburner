@@ -3,3 +3,4 @@ react.ts
 NetscriptDefinitions.d.ts
 react
 react-dom
+src/dev.ts
