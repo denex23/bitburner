@@ -1,7 +1,7 @@
 import { NS } from "@ns";
 
 const PASSWORD_PORT = 23;
-const PASSWORD_FILE = "src/data/dnet_passwords.json";
+const PASSWORD_FILE = "src/data/dnet/dnet_passwords.json";
 const NULL_PORT_DATA = "NULL PORT DATA";
 
 interface PasswordReport

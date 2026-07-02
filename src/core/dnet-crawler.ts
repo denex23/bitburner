@@ -5,7 +5,7 @@ const PASSWORD_PORT = 23;
 const DNET_CONTROL_PORT = 25;
 const FILE_ARCHIVE_PORT = 26
 
-const PASSWORD_FILE = "src/data/dnet_passwords.json";
+const PASSWORD_FILE = "src/data/dnet/dnet_passwords.json";
 
 const SHUTDOWN_COMMAND = "shutdown";
  
