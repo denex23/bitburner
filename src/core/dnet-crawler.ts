@@ -1,4 +1,4 @@
-import { AutocompleteData, DarknetServerDetails, NS } from '@ns'
+import { AutocompleteData, DarknetResult, DarknetServerDetails, NS } from '@ns'
 
 const LOG_PORT = 24;
 const PASSWORD_PORT = 23;
@@ -30,6 +30,8 @@ const FRESH_INSTALL_PASSWORDS: Record<string, string> = {
     "alphabetic:5": "admin",
     "alphabetic:8": "password",
 } as const;
+
+type AuthLogDataParser<T> = (data: unknown, authResult: DarknetResult & { data?: unknown }) => T | null;
 
 const LIT_BLACKLIST = new Set<string>([
     "cache-note-1.lit",
@@ -134,6 +136,7 @@ async function startPhishingAttack(ns: NS): Promise<void>
     }
 
     if (isCacheFile(result.message)) {
+        tryReportLog(ns, "DEBUG startPhishingAttack Cachefile", { result }, "INFO");
         handleCacheFile(ns, result.message);
     }
 }
@@ -454,15 +457,16 @@ async function authenticateDeepGreenServer(ns: NS, hostname: string, details: Da
             return true;
         }
 
-        const matches = parseDeepGreenMatches(result.data);
+        const matches = parseDeepGreenMatches(result.data)
+            ?? await readDeepGreenMatchesFromRecentLog(ns, hostname);
 
         if (null === matches) {
-            tryReportLog(ns, "Unexpected response data in authenticateDeepGreenServer()", {
+            tryReportLog(ns, "No DeepGreen feedback available", {
                 targetHostname: hostname,
                 passwordCandidate: candidate,
                 result,
                 details,
-            }, "ERROR");
+            }, "INFO");
 
             return false;
         }
@@ -533,22 +537,25 @@ async function authenticateAccountsManagerServer(ns: NS, hostname: string, detai
             return true;
         }
 
-        if ("Higher" === result.data) {
+        const direction = parseAccountsManagerDirection(result.data)
+            ?? await readAccountsManagerDirectionFromRecentLog(ns, hostname);
+
+        if ("Higher" === direction) {
             min = Number(password) + 1;
             continue;
         }
 
-        if ("Lower" === result.data) {
+        if ("Lower" === direction) {
             max = Number(password) - 1;
             continue;
         }
 
-        tryReportLog(ns, "Unexpected response data in authenticateAccountsManagerServer()", {
+        tryReportLog(ns, "No AccountsManager feedback available", {
             targetHostname: hostname,
             password,
             result,
             details,
-        }, "ERROR");
+        }, "INFO");
 
         return false;
     }
@@ -610,19 +617,18 @@ async function authenticateNilServer(ns: NS, hostname: string, details: DarknetS
 
         if (result.success) {
             await reportPassword(ns, hostname, candidate);
-
             return true;
         }
 
-        const matches = parseNilMatches(result.data, details.passwordLength);
+        const matches = await readNilMatchesFromRecentLog(ns, hostname, details.passwordLength);
 
         if (null === matches) {
-            tryReportLog(ns, "Unexpected response data in authenticateNilServer()", {
+            tryReportLog(ns, "No NIL feedback available", {
                 targetHostname: hostname,
                 passwordCandidate: candidate,
                 result,
                 details,
-            }, "ERROR");
+            }, "INFO");
 
             return false;
         }
@@ -672,30 +678,37 @@ async function authenticateOpenWebAccessPointServer(ns: NS, hostname: string, de
         return true;
     }
 
-    for (const password of extractOpenWebAccessPointPasswords(result.data, hostname, details.passwordLength)) {
+    const passwords = extractOpenWebAccessPointPasswords(result.data, hostname, details.passwordLength)
+        ?? await readOpenWebAccessPointPasswordsFromRecentLog(ns, hostname, details.passwordLength);
+
+    if (null === passwords) {
+        tryReportLog(ns, "No hostname credential found in OpenWebAccessPoint response", {
+            targetHostname: hostname,
+            passwordCandidate,
+            result,
+            details,
+        }, "INFO");
+
+        return false;
+    }
+
+    for (const password of passwords) {
         if (await authenticate(ns, hostname, password)) {
             return true;
         }
     }
 
-    tryReportLog(ns, "No hostname credential found in OpenWebAccessPoint response", {
-        targetHostname: hostname,
-        passwordCandidate,
-        result,
-        details,
-    }, "INFO");
-
     return false;
 }
 
-function extractOpenWebAccessPointPasswords(data: unknown, hostname: string, passwordLength: number): string[]
+function extractOpenWebAccessPointPasswords(data: unknown, hostname: string, passwordLength: number): string[] | null
 {
     if ("string" !== typeof data) {
-        return [];
+        return null;
     }
 
     const escapedHostname = escapeRegExp(hostname);
-    const pattern = new RegExp(`${escapedHostname}:([a-zA-Z0-9]+)`, "g");
+    const pattern = new RegExp(`${escapedHostname}:(\\d{${passwordLength}})`, "g");
     const passwords: string[] = [];
 
     for (const result of data.matchAll(pattern)) {
@@ -704,7 +717,9 @@ function extractOpenWebAccessPointPasswords(data: unknown, hostname: string, pas
         }
     }
 
-    return [...new Set(passwords)];
+    return passwords.length > 0
+        ? [...new Set(passwords)]
+        : null;
 }
 
 function escapeRegExp(value: string): string
@@ -734,6 +749,81 @@ function parseDeepGreenMatches(data: unknown): { exact: number, misplaced: numbe
     return { exact, misplaced };
 }
 
+async function readDeepGreenMatchesFromRecentLog(ns: NS, hostname: string): Promise<{ exact: number, misplaced: number } | null>
+{
+    return readAuthDataFromRecentLogs(ns, hostname, data => parseDeepGreenMatches(data));
+}
+
+async function readAccountsManagerDirectionFromRecentLog(ns: NS, hostname: string): Promise<"Higher" | "Lower" | null>
+{
+    return readAuthDataFromRecentLogs(ns, hostname, data => parseAccountsManagerDirection(data));
+}
+
+async function readOpenWebAccessPointPasswordsFromRecentLog(ns: NS, hostname: string, passwordLength: number): Promise<string[] | null>
+{
+    return readAuthDataFromRecentLogs(ns, hostname, data => extractOpenWebAccessPointPasswords(data, hostname, passwordLength));
+}
+
+async function readNilMatchesFromRecentLog(ns: NS, hostname: string, passwordLength: number): Promise<string[] | null>
+{
+    return readAuthDataFromRecentLogs(ns, hostname, data => parseNilMatches(data, passwordLength));
+}
+
+async function readAuthDataFromRecentLogs<T>(ns: NS, hostname: string, parseData: AuthLogDataParser<T>): Promise<T | null>
+{
+    const result = await ns.dnet.heartbleed(hostname, { peek: true, logsToCapture: 3 });
+
+    if (!result.success) {
+        return null;
+    }
+
+    for (const log of result.logs) {
+        const authResult = parseDarknetResultLog(log);
+
+        if (null === authResult) {
+            continue;
+        }
+
+        const parsedData = parseData(authResult.data, authResult);
+
+        if (null !== parsedData) {
+            return parsedData;
+        }
+    }
+
+    return null;
+}
+
+function parseDarknetResultLog(log: string): (DarknetResult & { data?: unknown }) | null
+{
+    try {
+        return JSON.parse(log) as DarknetResult & { data?: unknown };
+    } catch {
+        return null;
+    }
+}
+
+function parseAccountsManagerDirection(data: unknown): "Higher" | "Lower" | null
+{
+    if ("Higher" === data || "Lower" === data) {
+        return data;
+    }
+
+    if ("string" !== typeof data) {
+        return null;
+    }
+
+    if (data.includes("Higher")) {
+        return "Higher";
+    }
+
+    if (data.includes("Lower")) {
+        return "Lower";
+    }
+
+    return null;
+}
+
 function parseNilMatches(data: unknown, expectedLength: number): string[] | null
 {
     if ("string" !== typeof data) {
@@ -745,6 +835,10 @@ function parseNilMatches(data: unknown, expectedLength: number): string[] | null
         .map(value => value.trim());
 
     if (matches.length !== expectedLength) {
+        return null;
+    }
+
+    if (matches.some(value => "yes" !== value && "yesn't" !== value)) {
         return null;
     }
 
