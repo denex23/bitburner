@@ -3,13 +3,24 @@ import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
-import { WorkerAction } from "src/utils/constants";
-import { TARGET_ACTION } from "src/utils/constants";
-import { SCRIPT_RAM } from 'src/utils/constants';
-import { TARGET_HACK_RATIO, HACK_SECURITY_INCREASE, GROW_SECURITY_INCREASE } from "src/utils/constants";
+import { TargetState, WorkerAction } from "src/utils/constants";
+import { SCRIPT_RAM, TARGET_ACTION, TARGET_HACK_RATIO, HACK_SECURITY_INCREASE, GROW_SECURITY_INCREASE } from 'src/utils/constants';
 import { calculateSecurityDelta } from 'src/utils/calculation-helper';
 import { WorkerAllocation } from 'src/models/worker-allocation';
 import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
+
+type FarmPlan = {
+    hackThreads: number;
+    growThreads: number;
+    weakenThreads: number;
+    totalRam: number;
+}
+
+type PrepPlan = {
+    growThreads: number;
+    weakenThreads: number;
+    totalRam: number;
+}
 
 export class Allocator 
 {
@@ -67,29 +78,54 @@ export class Allocator
             const action = TARGET_ACTION[target.state];
             const targetRam = (target.priority / totalPriority) * workRam;
 
+            if (TargetState.Farm === target.state) {
+                this.allocateFarmTarget(workers, jobs, target, targetRam);
+                continue;
+            }
+
+            if (TargetState.Grow === target.state) {
+                this.allocatePrepTarget(workers, jobs, target, targetRam);
+                continue;
+            }
+
             this.allocateTarget(workers, jobs, target, action, targetRam);
         }
     }
 
     private allocateTarget(workers: WorkerAllocation[], jobs: WorkerJob[], target: TargetInfo, action: WorkerAction, allowedRam: number): void 
     {
-        let remainingThreads = this.calculateThreads(allowedRam, target, action);
+        this.allocateThreads(
+            workers,
+            jobs,
+            target,
+            action,
+            this.calculateThreads(allowedRam, target, action),
+        );
+    }
 
-        for (const worker of this.getAvailableWorkers(workers, action)) {
-            if (remainingThreads <= 0) {
-                return;
-            }
+    private allocateFarmTarget(workers: WorkerAllocation[], jobs: WorkerJob[], target: TargetInfo, allowedRam: number): void
+    {
+        const plan = this.createFarmPlan(target, allowedRam);
 
-            const workerThreads = Math.min(remainingThreads, Math.floor(worker.availableRam / SCRIPT_RAM[action]));
-
-            if (workerThreads <= 0) {
-                continue;
-            }
-
-            this.addJob(jobs, worker, target, action, workerThreads);
-
-            remainingThreads -= workerThreads;
+        if (null === plan) {
+            return;
         }
+
+        this.allocateThreads(workers, jobs, target, WorkerAction.Hack, plan.hackThreads);
+        this.allocateThreads(workers, jobs, target, WorkerAction.Grow, plan.growThreads);
+        this.allocateThreads(workers, jobs, target, WorkerAction.Weaken, plan.weakenThreads);
+    }
+
+    private allocatePrepTarget(workers: WorkerAllocation[], jobs: WorkerJob[], target: TargetInfo, allowedRam: number): void
+    {
+        const plan = this.createPrepPlan(target, allowedRam);
+
+        if (null === plan) {
+            return;
+        }
+
+        this.allocateThreads(workers, jobs, target, WorkerAction.Grow, plan.growThreads);
+        this.allocateThreads(workers, jobs, target, WorkerAction.Weaken, plan.weakenThreads);
     }
 
     private addJob(jobs: WorkerJob[], worker: WorkerAllocation, target: TargetInfo, action: WorkerAction, threads: number): number
@@ -111,6 +147,27 @@ export class Allocator
         worker.availableRam -= allocatedRam;
 
         return allocatedRam;
+    }
+
+    private allocateThreads(workers: WorkerAllocation[], jobs: WorkerJob[], target: TargetInfo, action: WorkerAction, threads: number): void
+    {
+        let remainingThreads = threads;
+
+        for (const worker of this.getAvailableWorkers(workers, action)) {
+            if (remainingThreads <= 0) {
+                return;
+            }
+
+            const workerThreads = Math.min(remainingThreads, Math.floor(worker.availableRam / SCRIPT_RAM[action]));
+
+            if (workerThreads <= 0) {
+                continue;
+            }
+
+            this.addJob(jobs, worker, target, action, workerThreads);
+
+            remainingThreads -= workerThreads;
+        }
     }
 
     private allocateShare(workers: WorkerAllocation[], jobs: WorkerJob[]): void
@@ -147,6 +204,104 @@ export class Allocator
         return workers
             .filter(worker => worker.availableRam >= SCRIPT_RAM[action])
             .sort((a, b) => a.availableRam - b.availableRam);
+    }
+
+    private createPrepPlan(target: TargetInfo, allowedRam: number): PrepPlan | null
+    {
+        const maxGrowThreads = Math.min(this.calculateGrowThreads(target), Math.floor(allowedRam / SCRIPT_RAM[WorkerAction.Grow]));
+
+        let min = 1;
+        let max = maxGrowThreads;
+        let bestPlan: PrepPlan | null = null;
+
+        while (min <= max) {
+            const growThreads = Math.floor(min + ((max - min) / 2));
+            const plan = this.calculatePrepPlan(target, growThreads);
+
+            if (plan.totalRam <= allowedRam) {
+                bestPlan = plan;
+                min = growThreads + 1;
+                continue;
+            }
+
+            max = growThreads - 1;
+        }
+
+        return bestPlan;
+    }
+
+    private calculatePrepPlan(target: TargetInfo, growThreads: number): PrepPlan
+    {
+        const weakenEffect = this.context.ns.formulas.hacking.weakenEffect(1);
+        const securityIncrease = calculateSecurityDelta(target) + this.calculateGrowSecurityIncrease(growThreads);
+        const weakenThreads = weakenEffect <= 0 ? 0 : Math.ceil(securityIncrease / weakenEffect);
+
+        return {
+            growThreads,
+            weakenThreads,
+            totalRam: this.calculatePrepPlanRam(growThreads, weakenThreads),
+        };
+    }
+
+    private calculatePrepPlanRam(growThreads: number, weakenThreads: number): number
+    {
+        return (growThreads * SCRIPT_RAM[WorkerAction.Grow]) + (weakenThreads * SCRIPT_RAM[WorkerAction.Weaken]);
+    }
+
+    private createFarmPlan(target: TargetInfo, allowedRam: number): FarmPlan | null
+    {
+        const maxHackThreads = Math.min(this.calculateHackThreads(target), Math.floor(allowedRam / SCRIPT_RAM[WorkerAction.Hack]));
+
+        let min = 1;
+        let max = maxHackThreads;
+        let bestPlan: FarmPlan | null = null;
+
+        while (min <= max) {
+            const hackThreads = Math.floor(min + ((max - min) / 2));
+            const plan = this.calculateFarmPlan(target, hackThreads);
+
+            if (plan.totalRam <= allowedRam) {
+                bestPlan = plan;
+                min = hackThreads + 1;
+                continue;
+            }
+
+            max = hackThreads - 1;
+        }
+
+        return bestPlan;
+    }
+
+    private calculateFarmPlan(target: TargetInfo, hackThreads: number): FarmPlan
+    {
+        const ns = this.context.ns;
+        const server = this.createServerSnapshot(target);
+        const player = ns.getPlayer();
+        const hackRatio = Math.min(TARGET_HACK_RATIO, ns.formulas.hacking.hackPercent(server, player) * hackThreads);
+
+        server.moneyAvailable = Math.max(1, target.currentMoney * (1 - hackRatio));
+
+        const growThreads = Math.max(1, Math.ceil(ns.formulas.hacking.growThreads(server, player, target.maxMoney)));
+        const securityIncrease = calculateSecurityDelta(target)
+            + this.calculateHackSecurityIncrease(hackThreads)
+            + this.calculateGrowSecurityIncrease(growThreads);
+
+        const weakenEffect = ns.formulas.hacking.weakenEffect(1);
+        const weakenThreads = weakenEffect <= 0 ? 0 : Math.ceil(securityIncrease / weakenEffect);
+
+        return {
+            hackThreads,
+            growThreads,
+            weakenThreads,
+            totalRam: this.calculateFarmPlanRam(hackThreads, growThreads, weakenThreads),
+        };
+    }
+
+    private calculateFarmPlanRam(hackThreads: number, growThreads: number, weakenThreads: number): number
+    {
+        return (hackThreads * SCRIPT_RAM[WorkerAction.Hack]) 
+            + (growThreads * SCRIPT_RAM[WorkerAction.Grow])
+            + (weakenThreads * SCRIPT_RAM[WorkerAction.Weaken]);
     }
 
     private calculateThreads(allowedRam: number, target: TargetInfo, action: WorkerAction): number 
