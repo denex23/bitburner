@@ -7,4 +7,5 @@ export interface WorkerJob
     action: WorkerAction;
     threads: number;
     allocatedRam: number;
+    delayMs?: number;
 }

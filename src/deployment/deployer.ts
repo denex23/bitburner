@@ -42,7 +42,8 @@ export class Deployer
             script,
             job.hostname,
             job.threads,
-            job.target
+            job.target,
+            job.delayMs ?? 0,
         );
 
         if (pid === 0) {
@@ -66,14 +67,14 @@ export class Deployer
 
     private createDesiredJobKeys(jobs: WorkerJob[]): Set<string> 
     {
-        return new Set(jobs.map(job => 
-            this.createJobKey(job.hostname, SCRIPT_MAP[job.action], job.target, job.threads)
+        return new Set(jobs.map(job =>
+            this.createJobKey(job.hostname, SCRIPT_MAP[job.action], job.target, job.threads, job.delayMs ?? 0)
         ));
     }
 
-    private createJobKey(hostname: string, script: string, target: string, threads: number): string 
+    private createJobKey(hostname: string, script: string, target: string, threads: number, delayMs: number = 0): string 
     {
-        return `${hostname}|${script}|${target}|${threads}`;
+        return `${hostname}|${script}|${target}|${threads}|${delayMs}`;
     }
 
     private isJobRunning(job: WorkerJob, script: string): boolean 
@@ -81,7 +82,8 @@ export class Deployer
         return this.context.ns.ps(job.hostname).some(process =>
             process.filename === script &&
             process.threads === job.threads &&
-            String(process.args[0] ?? "") === job.target
+            String(process.args[0] ?? "") === job.target &&
+            Number(process.args[1] ?? 0) === (job.delayMs ?? 0)
         );
     }
 
@@ -93,7 +95,8 @@ export class Deployer
             }
             
             const target = String(process.args[0] ?? "");
-            const jobKey = this.createJobKey(worker.hostname, process.filename, target, process.threads);
+            const delayMs = Number(process.args[1] ?? 0);
+            const jobKey = this.createJobKey(worker.hostname, process.filename, target, process.threads, delayMs);
 
             if (!desiredJobs.has(jobKey)) {
                 this.context.ns.kill(process.pid);

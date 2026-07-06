@@ -4,7 +4,7 @@ import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
 import { TargetState, WorkerAction } from "src/utils/constants";
-import { SCRIPT_RAM, TARGET_ACTION, TARGET_HACK_RATIO, HACK_SECURITY_INCREASE, GROW_SECURITY_INCREASE } from 'src/utils/constants';
+import { SCRIPT_RAM, TARGET_ACTION, TARGET_HACK_RATIO, HACK_SECURITY_INCREASE, GROW_SECURITY_INCREASE, BATCH_SPACING_MS } from 'src/utils/constants';
 import { calculateSecurityDelta } from 'src/utils/calculation-helper';
 import { WorkerAllocation } from 'src/models/worker-allocation';
 import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
@@ -111,9 +111,11 @@ export class Allocator
             return;
         }
 
-        this.allocateThreads(workers, jobs, target, WorkerAction.Hack, plan.hackThreads);
-        this.allocateThreads(workers, jobs, target, WorkerAction.Grow, plan.growThreads);
-        this.allocateThreads(workers, jobs, target, WorkerAction.Weaken, plan.weakenThreads);
+        const delays = this.createActionDelays(target);
+
+        this.allocateThreads(workers, jobs, target, WorkerAction.Hack, plan.hackThreads, delays[WorkerAction.Hack] ?? 0);
+        this.allocateThreads(workers, jobs, target, WorkerAction.Grow, plan.growThreads, delays[WorkerAction.Grow] ?? 0);
+        this.allocateThreads(workers, jobs, target, WorkerAction.Weaken, plan.weakenThreads, delays[WorkerAction.Weaken] ?? 0);
     }
 
     private allocatePrepTarget(workers: WorkerAllocation[], jobs: WorkerJob[], target: TargetInfo, allowedRam: number): void
@@ -124,32 +126,20 @@ export class Allocator
             return;
         }
 
-        this.allocateThreads(workers, jobs, target, WorkerAction.Grow, plan.growThreads);
-        this.allocateThreads(workers, jobs, target, WorkerAction.Weaken, plan.weakenThreads);
+        const delays = this.createActionDelays(target);
+
+        this.allocateThreads(workers, jobs, target, WorkerAction.Grow, plan.growThreads, delays[WorkerAction.Grow] ?? 0);
+        this.allocateThreads(workers, jobs, target, WorkerAction.Weaken, plan.weakenThreads, delays[WorkerAction.Weaken] ?? 0);
     }
 
-    private addJob(jobs: WorkerJob[], worker: WorkerAllocation, target: TargetInfo, action: WorkerAction, threads: number): number
-    {
-        if (threads <= 0) {
-            return 0;
-        }
-
-        const allocatedRam = threads * SCRIPT_RAM[action];
-
-        jobs.push({
-            hostname: worker.hostname,
-            target: target.hostname,
-            action,
-            threads,
-            allocatedRam: allocatedRam,
-        });
-
-        worker.availableRam -= allocatedRam;
-
-        return allocatedRam;
-    }
-
-    private allocateThreads(workers: WorkerAllocation[], jobs: WorkerJob[], target: TargetInfo, action: WorkerAction, threads: number): void
+    private allocateThreads(
+        workers: WorkerAllocation[],
+        jobs: WorkerJob[],
+        target: TargetInfo,
+        action: WorkerAction,
+        threads: number,
+        delayMs: number = 0,
+    ): void
     {
         let remainingThreads = threads;
 
@@ -164,7 +154,7 @@ export class Allocator
                 continue;
             }
 
-            this.addJob(jobs, worker, target, action, workerThreads);
+            this.addJob(jobs, worker, target, action, workerThreads, delayMs);
 
             remainingThreads -= workerThreads;
         }
@@ -181,6 +171,35 @@ export class Allocator
 
             this.addShareJob(jobs, worker, threads);
         }
+    }
+
+    private addJob(
+        jobs: WorkerJob[],
+        worker: WorkerAllocation,
+        target: TargetInfo,
+        action: WorkerAction,
+        threads: number,
+        delayMs: number = 0,
+    ): number
+    {
+        if (threads <= 0) {
+            return 0;
+        }
+
+        const allocatedRam = threads * SCRIPT_RAM[action];
+
+        jobs.push({
+            hostname: worker.hostname,
+            target: target.hostname,
+            action,
+            threads,
+            allocatedRam,
+            delayMs,
+        });
+
+        worker.availableRam -= allocatedRam;
+
+        return allocatedRam;
     }
 
     private addShareJob(jobs: WorkerJob[], worker: WorkerAllocation, threads: number): number
@@ -204,6 +223,23 @@ export class Allocator
         return workers
             .filter(worker => worker.availableRam >= SCRIPT_RAM[action])
             .sort((a, b) => a.availableRam - b.availableRam);
+    }
+
+    private createActionDelays(target: TargetInfo): Partial<Record<WorkerAction, number>>
+    {
+        const ns = this.context.ns;
+        const server = this.createServerSnapshot(target);
+        const player = ns.getPlayer();
+
+        const hackTime = ns.formulas.hacking.hackTime(server, player);
+        const growTime = ns.formulas.hacking.growTime(server, player);
+        const weakenTime = ns.formulas.hacking.weakenTime(server, player);
+
+        return {
+            [WorkerAction.Hack]: Math.max(0, weakenTime - hackTime - (BATCH_SPACING_MS * 2)),
+            [WorkerAction.Grow]: Math.max(0, weakenTime - growTime - BATCH_SPACING_MS),
+            [WorkerAction.Weaken]: 0,
+        };
     }
 
     private createPrepPlan(target: TargetInfo, allowedRam: number): PrepPlan | null

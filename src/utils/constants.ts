@@ -37,6 +37,8 @@ export const TARGET_HACK_RATIO = 0.10;
 export const HACK_SECURITY_INCREASE = 0.002;
 export const GROW_SECURITY_INCREASE = 0.004;
 
+export const BATCH_SPACING_MS = 200;
+
 export const FACTION_SERVERS = [
     "CSEC",
     "avmnite-02h",
