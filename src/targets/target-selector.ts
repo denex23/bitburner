@@ -15,11 +15,15 @@ export class TargetSelector
         const targets: TargetInfo[] = [];
 
         for (const server of servers) {
-            if (!server.rooted || server.maxMoney <= 0 || server.chance < 0.5) {
+            if (!server.rooted || server.maxMoney <= 0) {
                 continue;
             }
 
-            const score = calculateScore(server);
+            const score = calculateScore(this.context.ns, server);
+            if (score <= 0) {
+                continue;
+            }
+
             const state = this.determineState(server);
             const priority = this.calculatePriority(server, score, state);
 
