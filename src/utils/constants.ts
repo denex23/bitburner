@@ -33,6 +33,10 @@ export const PASSWORD_WRITER = "src/data/password-writer.ts";
 export const LOG_WRITER = "src/data/dnet-log-writer.ts";
 export const TXT_WRITER = "src/data/dnet-txt-writer.ts";
 
+export const TARGET_HACK_RATIO = 0.10;
+export const HACK_SECURITY_INCREASE = 0.002;
+export const GROW_SECURITY_INCREASE = 0.004;
+
 export const FACTION_SERVERS = [
     "CSEC",
     "avmnite-02h",

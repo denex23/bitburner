@@ -1,3 +1,4 @@
+import { Server } from "@ns";
 import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
@@ -5,7 +6,8 @@ import { WorkerJob } from "src/models/worker-job";
 import { WorkerAction } from "src/utils/constants";
 import { TARGET_ACTION } from "src/utils/constants";
 import { SCRIPT_RAM } from 'src/utils/constants';
-import { calculateSecurityDelta} from 'src/utils/calculation-helper';
+import { TARGET_HACK_RATIO, HACK_SECURITY_INCREASE, GROW_SECURITY_INCREASE } from "src/utils/constants";
+import { calculateSecurityDelta } from 'src/utils/calculation-helper';
 import { WorkerAllocation } from 'src/models/worker-allocation';
 import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
 
@@ -168,28 +170,60 @@ export class Allocator
 
     private calculateHackThreads(target: TargetInfo): number 
     {
-        const hackRatioPerThread = this.context.ns.hackAnalyze(target.hostname);
-        const targetHackRatio = 0.2;
+        const server = this.createServerSnapshot(target);
+        const player = this.context.ns.getPlayer();
+        const hackRatioPerThread = this.context.ns.formulas.hacking.hackPercent(server, player);
 
         if (hackRatioPerThread <= 0) {
             return 0;
         }
 
-        return Math.max(1, Math.floor(targetHackRatio / hackRatioPerThread));
+        return Math.max(1, Math.floor(TARGET_HACK_RATIO / hackRatioPerThread));
     }
 
     private calculateWeakenThreads(target: TargetInfo): number 
     {
         const securityDelta = calculateSecurityDelta(target);
+        const weakenEffect = this.context.ns.formulas.hacking.weakenEffect(1);
 
-        // TODO: exchange 0.05 with ns.weakenAnalyze(threads, cores) when using cores
-        return Math.max(1, Math.ceil(securityDelta / 0.05));
+        if (securityDelta <= 0 || weakenEffect <= 0) {
+            return 0;
+        }
+
+        return Math.ceil(securityDelta / weakenEffect);
     }
 
     private calculateGrowThreads(target: TargetInfo): number 
     {
-        const multiplier = target.maxMoney / Math.max(1, target.currentMoney);
+        const server = this.createServerSnapshot(target);
+        const player = this.context.ns.getPlayer();
 
-        return Math.max(1, Math.ceil(this.context.ns.growthAnalyze(target.hostname, multiplier)));
+        if (target.currentMoney >= target.maxMoney) {
+            return 0;
+        }
+
+        return Math.max(1, Math.ceil(this.context.ns.formulas.hacking.growThreads(server, player, target.maxMoney)));
+    }
+
+    private calculateHackSecurityIncrease(threads: number): number
+    {
+        return threads * HACK_SECURITY_INCREASE;
+    }
+
+    private calculateGrowSecurityIncrease(threads: number): number
+    {
+        return threads * GROW_SECURITY_INCREASE;
+    }
+
+    private createServerSnapshot(target: TargetInfo): Server
+    {
+        const server = this.context.ns.getServer(target.hostname);
+
+        server.moneyAvailable = Math.max(1, target.currentMoney);
+        server.moneyMax = target.maxMoney;
+        server.hackDifficulty = target.currentSecurity;
+        server.minDifficulty = target.minSecurity;
+
+        return server;
     }
 }
