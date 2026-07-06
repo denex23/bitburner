@@ -36,6 +36,7 @@ export const TXT_WRITER = "src/data/dnet-txt-writer.ts";
 export const TARGET_HACK_RATIO = 0.10;
 export const HACK_SECURITY_INCREASE = 0.002;
 export const GROW_SECURITY_INCREASE = 0.004;
+export const MAX_HACK_THREADS_PER_TARGET = 32;
 
 export const BATCH_SPACING_MS = 200;
 

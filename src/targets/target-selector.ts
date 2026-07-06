@@ -51,7 +51,7 @@ export class TargetSelector
         const moneyRatio = calculateMoneyRatio(server);
         const securityDelta = calculateSecurityDelta(server);
 
-        if (securityDelta > 5) {
+        if (securityDelta > 0.5) {
             return TargetState.Weaken;
         }
 

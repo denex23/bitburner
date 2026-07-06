@@ -4,7 +4,7 @@ import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
 import { TargetState, WorkerAction } from "src/utils/constants";
-import { SCRIPT_RAM, TARGET_ACTION, TARGET_HACK_RATIO, HACK_SECURITY_INCREASE, GROW_SECURITY_INCREASE, BATCH_SPACING_MS } from 'src/utils/constants';
+import { SCRIPT_RAM, TARGET_ACTION, TARGET_HACK_RATIO, HACK_SECURITY_INCREASE, GROW_SECURITY_INCREASE, BATCH_SPACING_MS, MAX_HACK_THREADS_PER_TARGET } from 'src/utils/constants';
 import { calculateSecurityDelta } from 'src/utils/calculation-helper';
 import { WorkerAllocation } from 'src/models/worker-allocation';
 import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
@@ -369,7 +369,10 @@ export class Allocator
             return 0;
         }
 
-        return Math.max(1, Math.floor(TARGET_HACK_RATIO / hackRatioPerThread));
+        return Math.min(
+            MAX_HACK_THREADS_PER_TARGET,
+            Math.max(1, Math.floor(TARGET_HACK_RATIO / hackRatioPerThread)),
+        )
     }
 
     private calculateWeakenThreads(target: TargetInfo): number 
