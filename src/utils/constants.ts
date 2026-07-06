@@ -26,8 +26,12 @@ export const CloudServer = {
 
 export type CloudServer = typeof CloudServer[keyof typeof CloudServer];
 
-export const RESERVED_HOME_RAM = 64;
+export const RESERVED_HOME_RAM = 128;
 export const CONTROLLER_SCRIPT = "src/core/controller.ts";
+
+export const PASSWORD_WRITER = "src/data/password-writer.ts";
+export const LOG_WRITER = "src/data/dnet-log-writer.ts";
+export const TXT_WRITER = "src/data/dnet-txt-writer.ts";
 
 export const FACTION_SERVERS = [
     "CSEC",
@@ -35,6 +39,20 @@ export const FACTION_SERVERS = [
     "I.I.I.I",
     "run4theh111z",
 ];
+
+export const CORPORATION_SERVERS = [
+    "fulcrumassets",
+    "fulcrumtech",
+    "ecorp",
+    "megacorp",
+    "4sigma", 
+    "kuai-gong",
+    "nwo",
+    "omnitek",
+    "blade",
+    "b-and-a",
+    "clarkinc",  
+]
 
 export const TARGET_ACTION: Record<TargetState, WorkerAction> = {
     [TargetState.Weaken]: WorkerAction.Weaken,
