@@ -76,22 +76,28 @@ export class DebugReporter
         const rows = new Map<string, AllocationRow>();
 
         for (const job of jobs) {
-            const row = rows.get(job.target);
+            const key = `${job.target}|${job.action}`;
+            const delayMs = job.delayMs ?? 0;
+            const row = rows.get(key);
 
             if (row) {
                 row.workers++;
                 row.threads += job.threads;
                 row.ram += job.allocatedRam;
+                row.minDelayMs = Math.min(row.minDelayMs, delayMs);
+                row.maxDelayMs = Math.max(row.maxDelayMs, delayMs);
 
                 continue;
             }
 
-            rows.set(job.target, {
+            rows.set(key, {
                 target: job.target,
                 action: job.action,
                 workers: 1,
                 threads: job.threads,
                 ram: job.allocatedRam,
+                minDelayMs: delayMs,
+                maxDelayMs: delayMs,
             });
         }
 
@@ -108,6 +114,7 @@ export class DebugReporter
             .column("Action")
             .column("Workers", undefined, Alignment.Right)
             .column("Threads", undefined, Alignment.Right)
+            .column("Delay", undefined, Alignment.Right)
             .column("RAM", undefined, Alignment.Right);
 
         for (const row of rows) {
@@ -116,6 +123,7 @@ export class DebugReporter
                 row.action,
                 row.workers.toString(),
                 row.threads.toString(),
+                this.formatDelay(row.minDelayMs, row.maxDelayMs),
                 ns.format.ram(row.ram)
             );
         }
@@ -212,6 +220,28 @@ export class DebugReporter
         }
 
         this.printTable(table);
+    }
+
+    private formatDelay(minDelayMs: number, maxDelayMs: number): string
+    {
+        if (minDelayMs === maxDelayMs) {
+            return this.formatMilliseconds(minDelayMs);
+        }
+
+        return `${this.formatMilliseconds(minDelayMs)} - ${this.formatMilliseconds(maxDelayMs)}`;
+    }
+
+    private formatMilliseconds(value: number): string
+    {
+        if (value <= 0) {
+            return "0ms";
+        }
+
+        if (value < 1000) {
+            return `${Math.round(value)}ms`;
+        }
+
+        return `${(value / 1000).toFixed(1)}s`;
     }
 
     private getActionFromFilename(filename: string): string {
