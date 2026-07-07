@@ -53,7 +53,7 @@ export class Allocator
             .map<WorkerAllocation>(server => { 
                 return {
                     hostname: server.hostname,
-                    availableRam: getWorkerRam(server)
+                    availableRam: Math.max(0, getWorkerRam(server) - this.context.ns.getServerUsedRam(server.hostname))
                 };
             });
     }

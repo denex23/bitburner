@@ -39,6 +39,7 @@ export const GROW_SECURITY_INCREASE = 0.004;
 export const MAX_HACK_THREADS_PER_TARGET = 32;
 
 export const BATCH_SPACING_MS = 200;
+export const CONTROLLER_INTERVAL_MS = 5000;
 
 export const FACTION_SERVERS = [
     "CSEC",

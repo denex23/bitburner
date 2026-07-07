@@ -8,9 +8,9 @@ export class Deployer
 {
     constructor(private readonly context: Context) {}
 
-    public async deploy(servers: ServerInfo[], jobs: WorkerJob[]): Promise<void> 
+    public async deploy(servers: ServerInfo[], jobs: WorkerJob[], protectedJobs: WorkerJob[] = jobs): Promise<void>
     {
-        const desiredJobs = this.createDesiredJobKeys(jobs);
+        const desiredJobs = this.createDesiredJobKeys(protectedJobs);
         const workers = this.getWorker(servers);
 
         for (const worker of workers) {
