@@ -1,8 +1,7 @@
 import { NS, Server } from "@ns"
 import { ServerInfo } from "src/models/server-info"
-import { SCRIPT_RAM, WorkerAction } from "src/utils/constants"
+import { SCRIPT_RAM, TARGET_HACK_RATIO, WorkerAction } from "src/utils/constants"
 
-const TARGET_HACK_PERCENT = 0.10;
 const HACK_SECURITY_INCREASE = 0.002;
 const GROW_SECURITY_INCREASE = 0.004;
 
@@ -23,7 +22,7 @@ export function calculateScore(ns: NS, serverInfo: ServerInfo): number
         return 0;
     }
 
-    const hackThreads = Math.max(1, Math.floor(TARGET_HACK_PERCENT / hackPercent));
+    const hackThreads = Math.max(1, Math.floor(TARGET_HACK_RATIO / hackPercent));
     const stolenMoney = serverInfo.maxMoney * hackPercent * hackThreads * hackChance;
 
     const moneyAfterHack = Math.max(1, serverInfo.maxMoney - stolenMoney);
