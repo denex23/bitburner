@@ -1,11 +1,12 @@
 import { Alignment } from "src/debug/cell-alignment";
 import { AllocationRow } from "src/debug/reports/allocation-row";
-import { TargetRow } from "./reports/target-row";
+import { TargetRow } from "src/debug/reports/target-row";
 import { Table } from "src/debug/table";
 import { Context } from "src/models/context";
 import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
+import { WorkerAction } from "src/utils/constants";
 
 export class DebugReporter 
 {
@@ -13,16 +14,25 @@ export class DebugReporter
 
     public report(servers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[]): void
     {
-        this.reportTargets(targets);
+        this.reportTargets(targets, jobs);
         this.reportAllocation(jobs);
         this.reportWorkers(servers);
         this.reportStaleWorkers(servers, jobs);
     }
 
-    private reportTargets(targets: TargetInfo[]): void
+    private reportTargets(targets: TargetInfo[], jobs: WorkerJob[]): void
     {
-        this.printTargets(this.buildTargetsReport(targets));
-        
+        this.printTargets(this.buildTargetsReport(this.filterReportedTargets(targets, jobs)));
+    }
+
+    private filterReportedTargets(targets: TargetInfo[], jobs: WorkerJob[]): TargetInfo[]
+    {
+        const usedTargets = new Set(jobs
+            .filter(job => "Share" !== job.target)
+            .map(job => job.target)
+        );
+
+        return targets.filter(target => usedTargets.has(target.hostname));
     }
 
     private buildTargetsReport(targets: TargetInfo[]): TargetRow[]
@@ -76,22 +86,28 @@ export class DebugReporter
         const rows = new Map<string, AllocationRow>();
 
         for (const job of jobs) {
+            const delayMs = job.delayMs ?? 0;
             const row = rows.get(job.target);
 
             if (row) {
                 row.workers++;
-                row.threads += job.threads;
+                row.actions = (row.actions.includes(job.action)) ? row.actions : [...row.actions, job.action];
+                row.threadsByAction[job.action] = (row.threadsByAction[job.action] ?? 0) + job.threads;;
                 row.ram += job.allocatedRam;
+                row.minDelayMs = Math.min(row.minDelayMs, delayMs);
+                row.maxDelayMs = Math.max(row.maxDelayMs, delayMs);
 
                 continue;
             }
 
             rows.set(job.target, {
                 target: job.target,
-                action: job.action,
+                actions: [job.action],
                 workers: 1,
-                threads: job.threads,
+                threadsByAction: { [job.action]: job.threads },
                 ram: job.allocatedRam,
+                minDelayMs: delayMs,
+                maxDelayMs: delayMs,
             });
         }
 
@@ -105,17 +121,19 @@ export class DebugReporter
 
         const table = new Table()
             .column("Target")
-            .column("Action")
+            .column("Actions")
             .column("Workers", undefined, Alignment.Right)
             .column("Threads", undefined, Alignment.Right)
+            .column("Delay", undefined, Alignment.Right)
             .column("RAM", undefined, Alignment.Right);
 
         for (const row of rows) {
             table.row(
                 row.target,
-                row.action,
+                this.formatActions(row.actions),
                 row.workers.toString(),
-                row.threads.toString(),
+                this.formatThreadsByAction(row.threadsByAction),
+                this.formatDelay(row.minDelayMs, row.maxDelayMs),
                 ns.format.ram(row.ram)
             );
         }
@@ -212,6 +230,40 @@ export class DebugReporter
         }
 
         this.printTable(table);
+    }
+
+    private formatActions(actions: string[]): string
+    {
+        return actions.join("/");
+    }
+
+    private formatThreadsByAction(threadsByAction: Partial<Record<WorkerAction, number>>): string
+    {
+        return Object.entries(threadsByAction)
+            .map(([action, threads]) => `${action[0]}${threads}`)
+            .join("/");
+    }
+
+    private formatDelay(minDelayMs: number, maxDelayMs: number): string
+    {
+        if (minDelayMs === maxDelayMs) {
+            return this.formatMilliseconds(minDelayMs);
+        }
+
+        return `${this.formatMilliseconds(minDelayMs)} - ${this.formatMilliseconds(maxDelayMs)}`;
+    }
+
+    private formatMilliseconds(value: number): string
+    {
+        if (value <= 0) {
+            return "0ms";
+        }
+
+        if (value < 1000) {
+            return `${Math.round(value)}ms`;
+        }
+
+        return `${(value / 1000).toFixed(1)}s`;
     }
 
     private getActionFromFilename(filename: string): string {

@@ -2,9 +2,13 @@ import { Context } from "src/models/context"
 import { ServerInfo } from "src/models/server-info"
 import { TargetInfo } from "src/models/target-info"
 import { calculateScore } from "src/targets/target-score"
-import { TargetState } from 'src/utils/constants';
+import { RESERVED_HOME_RAM, TargetState } from 'src/utils/constants';
 import { STATE_WEIGHT } from "src/utils/constants"
 import { calculateMoneyRatio, calculateSecurityDelta, calculateSecurityRatio } from "/src/utils/calculation-helper"
+
+const BASE_TARGET_LIMIT = 15;
+const RAM_PER_ADDITIONAL_TARGET = 8192;
+const MAX_TARGET_LIMIT = 40;
 
 export class TargetSelector 
 {
@@ -15,11 +19,15 @@ export class TargetSelector
         const targets: TargetInfo[] = [];
 
         for (const server of servers) {
-            if (!server.rooted || server.maxMoney <= 0 || server.chance < 0.5) {
+            if (!server.rooted || server.maxMoney <= 0) {
                 continue;
             }
 
-            const score = calculateScore(server);
+            const score = calculateScore(this.context.ns, server);
+            if (score <= 0) {
+                continue;
+            }
+
             const state = this.determineState(server);
             const priority = this.calculatePriority(server, score, state);
 
@@ -35,7 +43,7 @@ export class TargetSelector
             });
         }
 
-        return this.sortTargets(targets).slice(0, 15);
+        return this.sortTargets(targets).slice(0, this.getTargetLimit(servers));
     }
 
     private determineState(server: ServerInfo): TargetState 
@@ -43,7 +51,7 @@ export class TargetSelector
         const moneyRatio = calculateMoneyRatio(server);
         const securityDelta = calculateSecurityDelta(server);
 
-        if (securityDelta > 5) {
+        if (securityDelta > 0.5) {
             return TargetState.Weaken;
         }
 
@@ -86,5 +94,26 @@ export class TargetSelector
         const moneyDeficit = Math.max(0, (1 - calculateMoneyRatio(server)));
 
         return score * stateWeight * moneyDeficit * calculateSecurityRatio(server);
+    }
+
+    private getTargetLimit(servers: ServerInfo[]): number
+    {
+        const totalWorkerRam = servers
+            .filter(server => server.rooted && server.maxRam > 0)
+            .reduce((sum, server) => sum + this.getUsableWorkerRam(server), 0);
+
+        return Math.min(
+            MAX_TARGET_LIMIT,
+            BASE_TARGET_LIMIT + Math.floor(totalWorkerRam / RAM_PER_ADDITIONAL_TARGET),
+        );
+    }
+
+    private getUsableWorkerRam(server: ServerInfo): number
+    {
+        if ("home" !== server.hostname) {
+            return server.maxRam;
+        }
+
+        return Math.max(0, server.maxRam - RESERVED_HOME_RAM);
     }
 }

@@ -6,6 +6,8 @@ import { TargetSelector } from "src/targets/target-selector";
 import { Allocator } from "src/deployment/allocator";
 import { Deployer } from "src/deployment/deployer";
 import { DebugReporter } from 'src/debug/debug-reporter';
+import { BatchScheduler } from "src/deployment/batch-scheduler";
+import { CONTROLLER_INTERVAL_MS } from "src/utils/constants";
 
 export async function main(ns: NS) 
 {
@@ -16,6 +18,7 @@ export async function main(ns: NS)
     const selector = new TargetSelector(context);
     const allocator = new Allocator(context);
     const deployer = new Deployer(context);
+    const batchScheduler = new BatchScheduler(context);
 
     initTail(ns);
 
@@ -26,17 +29,20 @@ export async function main(ns: NS)
 
         // Plan
         const targets = selector.select(servers);
-        const jobs = allocator.allocate(servers, targets);
+        const availableTargets = batchScheduler.getAvailableTargets(targets);
+        const jobs = allocator.allocate(servers, availableTargets);
+        batchScheduler.register(jobs, targets);
+        const protectedJobs = batchScheduler.getProtectedJobs(jobs);
 
         // Refresh server/worker
-        await deployer.deploy(servers, jobs);
+        await deployer.deploy(servers, jobs, protectedJobs);
 
         // Debugging
         ns.clearLog();
         ns.ui.setTailTitle(`Reports - ${new Date().toLocaleString("de-DE")}`);
-        debugReporter.report(servers, targets, jobs);
+        debugReporter.report(servers, targets, protectedJobs);
 
-        await ns.sleep(60000);
+        await ns.sleep(CONTROLLER_INTERVAL_MS);
     }
 }
 

@@ -46,7 +46,7 @@ export class Scanner
             minSecurity: server.minDifficulty!,
             currentSecurity: server.hackDifficulty!,
             growth: server.serverGrowth!,
-            hackTime: ns.getHackTime(),
+            hackTime: ns.getHackTime(server.hostname),
             chance: ns.hackAnalyzeChance(server.hostname),
         };
     }
