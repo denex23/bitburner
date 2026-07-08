@@ -1,17 +1,22 @@
 import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info";
 import { WorkerJob } from "src/models/worker-job";
-import { SCRIPT_MAP } from 'src/utils/constants';
+import { SCRIPT_MAP, WorkerAction } from 'src/utils/constants';
 import { isWorkerServer } from 'src/deployment/worker-helper';
 
 export class Deployer 
 {
-    constructor(private readonly context: Context) {}
+    private readonly workerScripts: Set<string>;
 
-    public async deploy(servers: ServerInfo[], jobs: WorkerJob[]): Promise<void> 
+    constructor(private readonly context: Context) 
     {
-        const desiredJobs = this.createDesiredJobKeys(jobs);
-        const workers = this.getWorker(servers);
+        this.workerScripts = new Set<string>(Object.values(SCRIPT_MAP));
+    }
+
+    public async deploy(servers: ServerInfo[], jobs: WorkerJob[], protectedJobs: WorkerJob[] = jobs): Promise<void>
+    {
+        const desiredJobs = this.createDesiredJobKeys(protectedJobs);
+        const workers = this.getWorkers(servers);
 
         for (const worker of workers) {
             this.stopObsoleteProcesses(worker, desiredJobs);
@@ -24,11 +29,14 @@ export class Deployer
 
     private async deployJob(job: WorkerJob): Promise<void> 
     {
-        const ns = this.context.ns;
         const script = SCRIPT_MAP[job.action];
 
-        if (!ns.fileExists(script, "home")) {
-            ns.tprint(`[SCRIPT MISSING] ${script}`);
+        if (!this.isScriptAvailable(script)) {
+            return;
+        }
+
+        if (WorkerAction.Share === job.action) {
+            await this.deployShareJob(job, script);
             return;
         }
 
@@ -36,7 +44,41 @@ export class Deployer
             return;
         }
 
-        await ns.scp(script, job.hostname);
+        await this.copyScript(script, job.hostname);
+        this.freeRamForJob(job, script);
+        this.executeJob(job, script);
+    }
+
+    private async deployShareJob(job: WorkerJob, script: string): Promise<void>
+    {
+        if (this.hasShareProcess(job.hostname)) {
+            return;
+        }
+
+        await this.copyScript(script, job.hostname);
+
+        this.executeJob(job, script);
+    }
+
+    private isScriptAvailable(script: string): boolean
+    {
+        if (this.context.ns.fileExists(script, "home")) {
+            return true;
+        }
+
+        this.context.ns.tprint(`[SCRIPT MISSING] ${script}`);
+
+        return false;
+    }
+
+    private async copyScript(script: string, hostname: string): Promise<void>
+    {
+        await this.context.ns.scp(script, hostname);
+    }
+
+    private executeJob(job: WorkerJob, script: string): void
+    {
+        const ns = this.context.ns;
 
         const pid = ns.exec(
             script,
@@ -46,21 +88,14 @@ export class Deployer
             job.delayMs ?? 0,
         );
 
-        if (pid === 0) {
-            ns.tprint(
-                `[DEPLOY FAILED] ${job.hostname} -> ${script} ${job.target} ` +
-                `threads=${job.threads} ` +
-                `fileHome=${ns.fileExists(script, "home")} ` +
-                `fileWorker=${ns.fileExists(script, job.hostname)} ` +
-                `scriptRam=${ns.getScriptRam(script)} ` +
-                `workerRam=${ns.getServerMaxRam(job.hostname)} ` +
-                `needed=${job.threads * ns.getScriptRam(script)}` +
-                `freeRam=${ns.getServerMaxRam(job.hostname) - ns.getServerUsedRam(job.hostname)} `
-            );
+        if (pid !== 0) {
+            return;
         }
+
+        this.reportDeployFailure(job, script);
     }
 
-    private getWorker(servers: ServerInfo[]): ServerInfo[] 
+    private getWorkers(servers: ServerInfo[]): ServerInfo[] 
     {
         return servers.filter(server => isWorkerServer(server));
     }
@@ -93,6 +128,10 @@ export class Deployer
             if (!this.isWorkerScript(process.filename)) {
                 continue;
             }
+
+            if (this.isShareProcess(process.filename)) {
+                continue;
+            }
             
             const target = String(process.args[0] ?? "");
             const delayMs = Number(process.args[1] ?? 0);
@@ -104,8 +143,59 @@ export class Deployer
         }
     }
 
+    private hasShareProcess(hostname: string): boolean
+    {
+        return this.context.ns.ps(hostname).some(process =>
+            this.isShareProcess(process.filename)
+        );
+    }
+
+    private freeRamForJob(job: WorkerJob, script: string): void
+    {
+        const neededRam = job.threads * this.context.ns.getScriptRam(script);
+        const freeRam = this.getFreeRam(job.hostname);
+
+        if (freeRam >= neededRam) {
+            return;
+        }
+
+        this.stopShareProcesses(job.hostname);
+    }
+
+    private stopShareProcesses(host: string): void 
+    {
+        this.context.ns.scriptKill(SCRIPT_MAP[WorkerAction.Share], host);
+    }
+
+    private getFreeRam(hostname: string): number
+    {
+        return this.context.ns.getServerMaxRam(hostname)
+            - this.context.ns.getServerUsedRam(hostname);
+    }
+
+    private isShareProcess(script: string): boolean
+    {
+        return SCRIPT_MAP[WorkerAction.Share] === script;
+    }
+
     private isWorkerScript(script: string): boolean
     {
-        return Object.values(SCRIPT_MAP).includes(script);
+        return this.workerScripts.has(script);
+    }
+
+    private reportDeployFailure(job: WorkerJob, script: string): void
+    {
+        const ns = this.context.ns;
+
+        ns.tprint(
+            `[DEPLOY FAILED] ${job.hostname} -> ${script} ${job.target} ` +
+            `threads=${job.threads} ` +
+            `fileHome=${ns.fileExists(script, "home")} ` +
+            `fileWorker=${ns.fileExists(script, job.hostname)} ` +
+            `scriptRam=${ns.getScriptRam(script)} ` +
+            `workerRam=${ns.getServerMaxRam(job.hostname)} ` +
+            `needed=${job.threads * ns.getScriptRam(script)}` +
+            `freeRam=${this.getFreeRam(job.hostname)} `
+        );
     }
 }

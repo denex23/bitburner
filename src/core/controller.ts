@@ -6,6 +6,11 @@ import { TargetSelector } from "src/targets/target-selector";
 import { Allocator } from "src/deployment/allocator";
 import { Deployer } from "src/deployment/deployer";
 import { DebugReporter } from 'src/debug/debug-reporter';
+import { BatchScheduler } from "src/deployment/batch-scheduler";
+import { CONTROLLER_INTERVAL_MS } from "src/utils/constants";
+import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
+import { DashboardSnapshotWriter } from 'src/data/dshboard-writer';
+import { DashboardSnapshot } from 'src/models/dashboard-snapshot';
 
 export async function main(ns: NS) 
 {
@@ -16,6 +21,8 @@ export async function main(ns: NS)
     const selector = new TargetSelector(context);
     const allocator = new Allocator(context);
     const deployer = new Deployer(context);
+    const batchScheduler = new BatchScheduler(context);
+    const snapshotWriter = new DashboardSnapshotWriter(context);
 
     initTail(ns);
 
@@ -26,17 +33,47 @@ export async function main(ns: NS)
 
         // Plan
         const targets = selector.select(servers);
-        const jobs = allocator.allocate(servers, targets);
+        const availableTargets = batchScheduler.getAvailableTargets(targets);
+        const jobs = allocator.allocate(servers, availableTargets);
+        batchScheduler.register(jobs, targets);
+        const protectedJobs = batchScheduler.getProtectedJobs(jobs);
+
+        const totalWorkerRam = servers
+            .filter(server => isWorkerServer(server))
+            .reduce((sum, server) => sum + getWorkerRam(server), 0);
+
+        const availableWorkerRam = servers
+            .filter(server => isWorkerServer(server))
+            .reduce((sum, server) => sum + Math.max(
+                0,
+                getWorkerRam(server) - ns.getServerUsedRam(server.hostname)
+            ), 0);
+
+        const plannedRam = protectedJobs.reduce(
+            (sum, job) => sum + job.allocatedRam,
+            0
+        );
+
+        const snapshot: DashboardSnapshot = {
+            createdAt: Date.now(),
+            totalWorkerRam,
+            availableWorkerRam,
+            plannedRam,
+            targets,
+            jobs: protectedJobs,
+        };
 
         // Refresh server/worker
-        await deployer.deploy(servers, jobs);
+        await deployer.deploy(servers, jobs, protectedJobs);
 
         // Debugging
         ns.clearLog();
         ns.ui.setTailTitle(`Reports - ${new Date().toLocaleString("de-DE")}`);
-        debugReporter.report(servers, targets, jobs);
+        debugReporter.report(servers, targets, protectedJobs);
 
-        await ns.sleep(60000);
+        snapshotWriter.write(snapshot);
+
+        await ns.sleep(CONTROLLER_INTERVAL_MS);
     }
 }
 

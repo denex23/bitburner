@@ -1,3 +1,5 @@
+.agents
+.vscode
 tsconfig.json
 react.ts
 NetscriptDefinitions.d.ts

@@ -6,6 +6,6 @@ export async function main(ns)
     if (delayMs > 0) {
         await ns.sleep(delayMs);
     }
-    
+
     await ns.hack(target);
 }

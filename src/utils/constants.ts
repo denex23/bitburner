@@ -1,4 +1,3 @@
-// Define TargetState as const object
 export const TargetState = {
     Weaken: "weaken",
     Grow: "grow",
@@ -7,7 +6,6 @@ export const TargetState = {
 
 export type TargetState = typeof TargetState[keyof typeof TargetState];
 
-// Define WorkerAction as const object
 export const WorkerAction = {
     Hack: "hack",
     Grow: "grow",
@@ -17,7 +15,6 @@ export const WorkerAction = {
 
 export type WorkerAction = typeof WorkerAction[keyof typeof WorkerAction];
 
-// Define WorkerAction as const object
 export const CloudServer = {
     Prefix: "cloud-server",
     Count: 25,
@@ -33,12 +30,22 @@ export const PASSWORD_WRITER = "src/data/password-writer.ts";
 export const LOG_WRITER = "src/data/dnet-log-writer.ts";
 export const TXT_WRITER = "src/data/dnet-txt-writer.ts";
 
-export const TARGET_HACK_RATIO = 0.10;
+export const DASHBOARD_SNAPSHOT_FILE = "/tmp/dashboard-snapshot.txt";
+
+export const SHARE_TARGET = "Share";
+export const SHARE_RAM_BUFFER = 32;
+
+export const TARGET_HACK_RATIO = 0.30;
 export const HACK_SECURITY_INCREASE = 0.002;
 export const GROW_SECURITY_INCREASE = 0.004;
-export const MAX_HACK_THREADS_PER_TARGET = 32;
+export const MAX_HACK_THREADS_PER_TARGET = 48;
 
+export const FARM_RAM_RATIO = 0.7;
+export const PREP_RAM_RATIO = 0.3;
+
+export const MAX_ACTIVE_BATCHES_PER_TARGET = 6;
 export const BATCH_SPACING_MS = 200;
+export const CONTROLLER_INTERVAL_MS = 5000;
 
 export const FACTION_SERVERS = [
     "CSEC",
@@ -59,7 +66,7 @@ export const CORPORATION_SERVERS = [
     "blade",
     "b-and-a",
     "clarkinc",  
-]
+];
 
 export const TARGET_ACTION: Record<TargetState, WorkerAction> = {
     [TargetState.Weaken]: WorkerAction.Weaken,
