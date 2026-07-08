@@ -6,7 +6,7 @@ import { Context } from "src/models/context";
 import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
-import { WorkerAction } from "src/utils/constants";
+import { TargetState, WorkerAction } from "src/utils/constants";
 
 export class DebugReporter 
 {
@@ -17,7 +17,7 @@ export class DebugReporter
         this.reportTargets(targets, jobs);
         this.reportAllocation(jobs);
         this.reportWorkers(servers);
-        this.reportStaleWorkers(servers, jobs);
+        //this.reportStaleWorkers(servers, jobs);
     }
 
     private reportTargets(targets: TargetInfo[], jobs: WorkerJob[]): void
@@ -32,7 +32,10 @@ export class DebugReporter
             .map(job => job.target)
         );
 
-        return targets.filter(target => usedTargets.has(target.hostname));
+        return targets.filter(target =>
+            usedTargets.has(target.hostname)
+            || TargetState.Farm === target.state
+        );
     }
 
     private buildTargetsReport(targets: TargetInfo[]): TargetRow[]
