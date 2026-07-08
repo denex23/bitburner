@@ -3,11 +3,22 @@ import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
-import { TargetState, WorkerAction } from "src/utils/constants";
-import { SCRIPT_RAM, TARGET_ACTION, TARGET_HACK_RATIO, HACK_SECURITY_INCREASE, GROW_SECURITY_INCREASE, BATCH_SPACING_MS, MAX_HACK_THREADS_PER_TARGET } from 'src/utils/constants';
+import { SHARE_RAM_BUFFER, TargetState, WorkerAction } from "src/utils/constants";
 import { calculateSecurityDelta } from 'src/utils/calculation-helper';
 import { WorkerAllocation } from 'src/models/worker-allocation';
 import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
+import { 
+    SCRIPT_RAM, 
+    SCRIPT_MAP,
+    TARGET_ACTION, 
+    TARGET_HACK_RATIO, 
+    HACK_SECURITY_INCREASE, 
+    GROW_SECURITY_INCREASE, 
+    BATCH_SPACING_MS, 
+    MAX_HACK_THREADS_PER_TARGET, 
+    FARM_RAM_RATIO, 
+    PREP_RAM_RATIO,
+} from 'src/utils/constants';
 
 type FarmPlan = {
     hackThreads: number;
@@ -38,8 +49,10 @@ export class Allocator
             .filter(t => t.state === "farm")
             .sort((a, b) => b.priority - a.priority);
 
-        this.allocateWorker(workerAllocations, workTargets, jobs, farmTargets.length === 0);
-        this.allocateWorker(workerAllocations, farmTargets, jobs);
+        const totalRam = this.calculateTotalAvailableRam(workerAllocations);
+
+        this.allocateWorker(workerAllocations, farmTargets, jobs, totalRam * FARM_RAM_RATIO);
+        this.allocateWorker(workerAllocations, workTargets, jobs, totalRam * PREP_RAM_RATIO);
         this.allocateShare(workerAllocations, jobs);
 
         return jobs;
@@ -53,12 +66,20 @@ export class Allocator
             .map<WorkerAllocation>(server => { 
                 return {
                     hostname: server.hostname,
-                    availableRam: Math.max(0, getWorkerRam(server) - this.context.ns.getServerUsedRam(server.hostname))
+                    availableRam: Math.max(0, getWorkerRam(server) - this.getUsedRamWithoutShare(server.hostname)),
+                    freeRam: Math.max(0, getWorkerRam(server) - this.context.ns.getServerUsedRam(server.hostname)),
                 };
             });
     }
 
-    private allocateWorker(workers: WorkerAllocation[], targets: TargetInfo[], jobs: WorkerJob[], useAllRam: boolean = false): void 
+    private calculateTotalAvailableRam(workers: WorkerAllocation[]): number
+    {
+        return workers.reduce(
+            (sum, worker) => sum + worker.availableRam, 0
+        );
+    }
+
+    private allocateWorker(workers: WorkerAllocation[], targets: TargetInfo[], jobs: WorkerJob[], ramBudget: number): void 
     {
         if (targets.length === 0) {
             return;
@@ -68,15 +89,9 @@ export class Allocator
             (sum, target) => sum + target.priority, 0
         );
 
-        const totalRam = workers.reduce(
-            (sum, worker) => sum + worker.availableRam, 0
-        );
-
-        const workRam = useAllRam ? totalRam : totalRam * 0.8;
-
         for (const target of targets) {
             const action = TARGET_ACTION[target.state];
-            const targetRam = (target.priority / totalPriority) * workRam;
+            const targetRam = (target.priority / totalPriority) * ramBudget;
 
             if (TargetState.Farm === target.state) {
                 this.allocateFarmTarget(workers, jobs, target, targetRam);
@@ -162,8 +177,9 @@ export class Allocator
 
     private allocateShare(workers: WorkerAllocation[], jobs: WorkerJob[]): void
     {
-        for (const worker of this.getAvailableWorkers(workers, WorkerAction.Share)) {
-            const threads = Math.floor(worker.availableRam / SCRIPT_RAM[WorkerAction.Share]);
+        for (const worker of this.getAvailableShareWorkers(workers)) {
+            const shareRam = Math.max(0, worker.freeRam - SHARE_RAM_BUFFER);
+            const threads = Math.floor(shareRam / SCRIPT_RAM[WorkerAction.Share]);
 
             if (threads <= 0) {
                 continue;
@@ -194,10 +210,12 @@ export class Allocator
             action,
             threads,
             allocatedRam,
+            createdAt: Date.now(),
             delayMs,
         });
 
         worker.availableRam -= allocatedRam;
+        worker.freeRam = Math.max(0, worker.freeRam - allocatedRam);
 
         return allocatedRam;
     }
@@ -212,9 +230,11 @@ export class Allocator
             action: WorkerAction.Share,
             threads,
             allocatedRam,
+            createdAt: Date.now(),
         });
 
         worker.availableRam -= allocatedRam;
+        worker.freeRam -= allocatedRam;
 
         return allocatedRam;
     }
@@ -223,6 +243,23 @@ export class Allocator
         return workers
             .filter(worker => worker.availableRam >= SCRIPT_RAM[action])
             .sort((a, b) => a.availableRam - b.availableRam);
+    }
+
+    private getAvailableShareWorkers(workers: WorkerAllocation[]): WorkerAllocation[]
+    {
+        return workers
+            .filter(worker => worker.freeRam >= SCRIPT_RAM[WorkerAction.Share])
+            .sort((a, b) => a.freeRam - b.freeRam);
+    }
+
+    private getUsedRamWithoutShare(hostname: string): number
+    {
+        return this.context.ns.ps(hostname)
+            .filter(process => SCRIPT_MAP[WorkerAction.Share] !== process.filename)
+            .reduce(
+                (sum, process) => sum + (this.context.ns.getScriptRam(process.filename, hostname) * process.threads),
+                0,
+            );
     }
 
     private createActionDelays(target: TargetInfo): Partial<Record<WorkerAction, number>>

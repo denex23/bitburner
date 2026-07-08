@@ -1,7 +1,7 @@
 import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info";
 import { WorkerJob } from "src/models/worker-job";
-import { SCRIPT_MAP } from 'src/utils/constants';
+import { SCRIPT_MAP, WorkerAction } from 'src/utils/constants';
 import { isWorkerServer } from 'src/deployment/worker-helper';
 
 export class Deployer 
@@ -32,11 +32,23 @@ export class Deployer
             return;
         }
 
+        if (WorkerAction.Share === job.action) {
+            await this.deployShareJob(job, script);
+            return;
+        }
+
         if (this.isJobRunning(job, script)) {
             return;
         }
 
         await ns.scp(script, job.hostname);
+        this.freeRamForJob(job, script);
+        this.execJob(job, script);
+    }
+
+    private execJob(job: WorkerJob, script: string): void
+    {
+        const ns = this.context.ns;
 
         const pid = ns.exec(
             script,
@@ -46,18 +58,31 @@ export class Deployer
             job.delayMs ?? 0,
         );
 
-        if (pid === 0) {
-            ns.tprint(
-                `[DEPLOY FAILED] ${job.hostname} -> ${script} ${job.target} ` +
-                `threads=${job.threads} ` +
-                `fileHome=${ns.fileExists(script, "home")} ` +
-                `fileWorker=${ns.fileExists(script, job.hostname)} ` +
-                `scriptRam=${ns.getScriptRam(script)} ` +
-                `workerRam=${ns.getServerMaxRam(job.hostname)} ` +
-                `needed=${job.threads * ns.getScriptRam(script)}` +
-                `freeRam=${ns.getServerMaxRam(job.hostname) - ns.getServerUsedRam(job.hostname)} `
-            );
+        if (pid !== 0) {
+            return;
         }
+
+        ns.tprint(
+            `[DEPLOY FAILED] ${job.hostname} -> ${script} ${job.target} ` +
+            `threads=${job.threads} ` +
+            `fileHome=${ns.fileExists(script, "home")} ` +
+            `fileWorker=${ns.fileExists(script, job.hostname)} ` +
+            `scriptRam=${ns.getScriptRam(script)} ` +
+            `workerRam=${ns.getServerMaxRam(job.hostname)} ` +
+            `needed=${job.threads * ns.getScriptRam(script)}` +
+            `freeRam=${ns.getServerMaxRam(job.hostname) - ns.getServerUsedRam(job.hostname)} `
+        );
+    }
+
+    private async deployShareJob(job: WorkerJob, script: string): Promise<void>
+    {
+        if (this.hasShareProcess(job.hostname)) {
+            return;
+        }
+
+        await this.context.ns.scp(script, job.hostname);
+
+        this.execJob(job, script);
     }
 
     private getWorker(servers: ServerInfo[]): ServerInfo[] 
@@ -93,6 +118,10 @@ export class Deployer
             if (!this.isWorkerScript(process.filename)) {
                 continue;
             }
+
+            if (this.isShareProcess(process.filename)) {
+                continue;
+            }
             
             const target = String(process.args[0] ?? "");
             const delayMs = Number(process.args[1] ?? 0);
@@ -102,6 +131,36 @@ export class Deployer
                 this.context.ns.kill(process.pid);
             }
         }
+    }
+
+    private hasShareProcess(hostname: string): boolean
+    {
+        return this.context.ns.ps(hostname).some(process =>
+            this.isShareProcess(process.filename)
+        );
+    }
+
+    private freeRamForJob(job: WorkerJob, script: string): void
+    {
+        const neededRam = job.threads * this.context.ns.getScriptRam(script);
+        const freeRam = this.context.ns.getServerMaxRam(job.hostname)
+            - this.context.ns.getServerUsedRam(job.hostname);
+
+        if (freeRam >= neededRam) {
+            return;
+        }
+
+        this.stopShareProcesses(job.hostname);
+    }
+
+    private stopShareProcesses(host: string): void 
+    {
+        this.context.ns.scriptKill(SCRIPT_MAP.share, host);
+    }
+
+    private isShareProcess(script: string): boolean
+    {
+        return SCRIPT_MAP.share === script;
     }
 
     private isWorkerScript(script: string): boolean

@@ -2,7 +2,7 @@ import { Server } from "@ns";
 import { Context } from "src/models/context";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
-import { WorkerAction } from "src/utils/constants";
+import { WorkerAction, MAX_ACTIVE_BATCHES_PER_TARGET, TargetState } from "src/utils/constants";
 
 type ActiveBatch = {
     target: string;
@@ -12,7 +12,7 @@ type ActiveBatch = {
 
 export class BatchScheduler
 {
-    private readonly activeBatches = new Map<string, ActiveBatch>();
+    private readonly activeBatches = new Map<string, ActiveBatch[]>();
 
     constructor(private readonly context: Context) {}
 
@@ -20,7 +20,9 @@ export class BatchScheduler
     {
         this.removeFinishedBatches();
 
-        return targets.filter(target => !this.activeBatches.has(target.hostname));
+        return targets.filter(target =>
+            (this.activeBatches.get(target.hostname)?.length ?? 0) < this.getMaxActiveBatches(target)
+        );
     }
 
     public register(jobs: WorkerJob[], targets: TargetInfo[]): void
@@ -33,15 +35,21 @@ export class BatchScheduler
         for (const [target, targetJobs] of jobsByTarget) {
             const targetInfo = targetsByHostname.get(target);
 
-            if (undefined === targetInfo || this.activeBatches.has(target)) {
+            if (undefined === targetInfo) {
                 continue;
             }
 
-            this.activeBatches.set(target, {
+            const targetBatches = this.activeBatches.get(target) ?? [];
+
+            if (this.getMaxActiveBatches(targetInfo) <= targetBatches.length) {
+                continue;
+            }
+
+            this.activeBatches.set(target, [...targetBatches, {
                 target,
                 finishAt: this.calculateFinishAt(targetInfo, targetJobs),
                 jobs: targetJobs,
-            });
+            }]);
         }
     }
 
@@ -49,10 +57,7 @@ export class BatchScheduler
     {
         this.removeFinishedBatches();
 
-        return [
-            ...this.getActiveBatchJobs(),
-            ...jobs.filter(job => WorkerAction.Share === job.action),
-        ];
+        return this.getActiveBatchJobs();
     }
 
     private groupBatchJobsByTarget(jobs: WorkerJob[]): Map<string, WorkerJob[]>
@@ -112,9 +117,15 @@ export class BatchScheduler
         return 0;
     }
 
+    private getMaxActiveBatches(target: TargetInfo): number
+    {
+        return TargetState.Farm === target.state ? MAX_ACTIVE_BATCHES_PER_TARGET : 1;
+    }
+
     private getActiveBatchJobs(): WorkerJob[]
     {
         return [...this.activeBatches.values()]
+            .flatMap(batches => batches)
             .flatMap(batch => batch.jobs);
     }
 
@@ -122,10 +133,15 @@ export class BatchScheduler
     {
         const now = Date.now();
 
-        for (const [target, batch] of this.activeBatches) {
-            if (batch.finishAt <= now) {
+        for (const [target, batches] of this.activeBatches) {
+            const ongoingBatches = batches.filter(batch => batch.finishAt > now );
+
+            if (ongoingBatches.length <= 0) {
                 this.activeBatches.delete(target);
+                continue;
             }
+
+            this.activeBatches.set(target, ongoingBatches);
         }
     }
 }
