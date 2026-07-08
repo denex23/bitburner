@@ -32,6 +32,7 @@ export const TXT_WRITER = "src/data/dnet-txt-writer.ts";
 
 export const DASHBOARD_SNAPSHOT_FILE = "/tmp/dashboard-snapshot.txt";
 
+export const SHARE_TARGET = "Share";
 export const SHARE_RAM_BUFFER = 32;
 
 export const TARGET_HACK_RATIO = 0.30;
