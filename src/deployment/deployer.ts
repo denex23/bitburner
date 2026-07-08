@@ -11,7 +11,7 @@ export class Deployer
     public async deploy(servers: ServerInfo[], jobs: WorkerJob[], protectedJobs: WorkerJob[] = jobs): Promise<void>
     {
         const desiredJobs = this.createDesiredJobKeys(protectedJobs);
-        const workers = this.getWorker(servers);
+        const workers = this.getWorkers(servers);
 
         for (const worker of workers) {
             this.stopObsoleteProcesses(worker, desiredJobs);
@@ -85,7 +85,7 @@ export class Deployer
         this.execJob(job, script);
     }
 
-    private getWorker(servers: ServerInfo[]): ServerInfo[] 
+    private getWorkers(servers: ServerInfo[]): ServerInfo[] 
     {
         return servers.filter(server => isWorkerServer(server));
     }
@@ -155,7 +155,7 @@ export class Deployer
 
     private stopShareProcesses(host: string): void 
     {
-        this.context.ns.scriptKill(SCRIPT_MAP.share, host);
+        this.context.ns.scriptKill(SCRIPT_MAP[WorkerAction.Share], host);
     }
 
     private isShareProcess(script: string): boolean

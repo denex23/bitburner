@@ -3,7 +3,6 @@ import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
-import { SHARE_RAM_BUFFER, TargetState, WorkerAction } from "src/utils/constants";
 import { calculateSecurityDelta } from 'src/utils/calculation-helper';
 import { WorkerAllocation } from 'src/models/worker-allocation';
 import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
@@ -18,6 +17,9 @@ import {
     MAX_HACK_THREADS_PER_TARGET, 
     FARM_RAM_RATIO, 
     PREP_RAM_RATIO,
+    SHARE_RAM_BUFFER,
+    TargetState,
+    WorkerAction,
 } from 'src/utils/constants';
 
 type FarmPlan = {
@@ -42,11 +44,11 @@ export class Allocator
         const jobs: WorkerJob[] = [];
         const workerAllocations = this.getWorkerAllocations(servers);
         const workTargets = targets
-            .filter(t => t.state !== "farm")
+            .filter(target => TargetState.Farm !== target.state)
             .sort((a, b) => b.priority - a.priority);
 
         const farmTargets = targets
-            .filter(t => t.state === "farm")
+            .filter(target => TargetState.Farm === target.state)
             .sort((a, b) => b.priority - a.priority);
 
         const totalRam = this.calculateTotalAvailableRam(workerAllocations);
@@ -64,10 +66,12 @@ export class Allocator
             .filter(server => isWorkerServer(server) )
             .sort((a, b) => b.maxRam - a.maxRam)
             .map<WorkerAllocation>(server => { 
+                const workerRam = getWorkerRam(server);
+
                 return {
                     hostname: server.hostname,
-                    availableRam: Math.max(0, getWorkerRam(server) - this.getUsedRamWithoutShare(server.hostname)),
-                    freeRam: Math.max(0, getWorkerRam(server) - this.context.ns.getServerUsedRam(server.hostname)),
+                    availableRam: Math.max(0, workerRam - this.getUsedRamWithoutShare(server.hostname)),
+                    freeRam: Math.max(0, workerRam - this.context.ns.getServerUsedRam(server.hostname)),
                 };
             });
     }
@@ -178,8 +182,9 @@ export class Allocator
     private allocateShare(workers: WorkerAllocation[], jobs: WorkerJob[]): void
     {
         for (const worker of this.getAvailableShareWorkers(workers)) {
-            const shareRam = Math.max(0, worker.freeRam - SHARE_RAM_BUFFER);
-            const threads = Math.floor(shareRam / SCRIPT_RAM[WorkerAction.Share]);
+            const threads = Math.floor(
+                Math.max(0, worker.freeRam - SHARE_RAM_BUFFER) / SCRIPT_RAM[WorkerAction.Share]
+            );
 
             if (threads <= 0) {
                 continue;
@@ -203,6 +208,7 @@ export class Allocator
         }
 
         const allocatedRam = threads * SCRIPT_RAM[action];
+        const createdAt = Date.now();
 
         jobs.push({
             hostname: worker.hostname,
@@ -210,7 +216,7 @@ export class Allocator
             action,
             threads,
             allocatedRam,
-            createdAt: Date.now(),
+            createdAt,
             delayMs,
         });
 
@@ -234,12 +240,13 @@ export class Allocator
         });
 
         worker.availableRam -= allocatedRam;
-        worker.freeRam -= allocatedRam;
+        worker.freeRam = Math.max(0, worker.freeRam - allocatedRam);
 
         return allocatedRam;
     }
 
-    private getAvailableWorkers(workers: WorkerAllocation[], action: WorkerAction): WorkerAllocation[] {
+    private getAvailableWorkers(workers: WorkerAllocation[], action: WorkerAction): WorkerAllocation[] 
+    {
         return workers
             .filter(worker => worker.availableRam >= SCRIPT_RAM[action])
             .sort((a, b) => a.availableRam - b.availableRam);
@@ -409,7 +416,7 @@ export class Allocator
         return Math.min(
             MAX_HACK_THREADS_PER_TARGET,
             Math.max(1, Math.floor(TARGET_HACK_RATIO / hackRatioPerThread)),
-        )
+        );
     }
 
     private calculateWeakenThreads(target: TargetInfo): number 
