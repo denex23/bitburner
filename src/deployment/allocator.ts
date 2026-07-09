@@ -212,7 +212,7 @@ export class Allocator
     private calculateShareThreads(worker: WorkerAllocation): number
     {
         return Math.floor(
-            Math.max(0, worker.freeRam - SHARE_RAM_BUFFER) / SCRIPT_RAM[WorkerAction.Share]
+            Math.max(0, worker.availableRam - SHARE_RAM_BUFFER) / SCRIPT_RAM[WorkerAction.Share]
         );
     }
 
@@ -389,6 +389,7 @@ export class Allocator
         const hackRatio = Math.min(TARGET_HACK_RATIO, ns.formulas.hacking.hackPercent(server, player) * hackThreads);
 
         server.moneyAvailable = Math.max(1, target.currentMoney * (1 - hackRatio));
+        server.hackDifficulty! += this.calculateHackSecurityIncrease(hackThreads);
 
         const growThreads = Math.max(1, Math.ceil(ns.formulas.hacking.growThreads(server, player, target.maxMoney)));
         const securityIncrease = calculateSecurityDelta(target)

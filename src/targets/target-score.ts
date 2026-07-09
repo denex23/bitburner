@@ -1,9 +1,6 @@
 import { NS, Server } from "@ns"
 import { ServerInfo } from "src/models/server-info"
-import { SCRIPT_RAM, TARGET_HACK_RATIO, WorkerAction } from "src/utils/constants"
-
-const HACK_SECURITY_INCREASE = 0.002;
-const GROW_SECURITY_INCREASE = 0.004;
+import { SCRIPT_RAM, TARGET_HACK_RATIO, GROW_SECURITY_INCREASE, HACK_SECURITY_INCREASE, WorkerAction } from "src/utils/constants"
 
 export function calculateScore(ns: NS, serverInfo: ServerInfo): number 
 {
@@ -41,7 +38,10 @@ export function calculateScore(ns: NS, serverInfo: ServerInfo): number
         return 0;
     }
 
-    return stolenMoney / totalRam / (weakenTime / 1000);
+    const moneyPerSecond = stolenMoney / (weakenTime / 1000);
+    const ramPenalty = Math.max(1, Math.log2(totalRam));
+
+    return moneyPerSecond / ramPenalty;
 }
 
 function createOptimalServer(ns: NS, serverInfo: ServerInfo): Server

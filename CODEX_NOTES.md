@@ -46,6 +46,56 @@ This file captures project context that should survive across Codex chats.
   10. Clarke Incorporated
 - Fulcrum Secret Technologies is partly blocked by prerequisite augmentations. ECorp provides `PC Direct-Neural Interface`, which unlocks Fulcrum augmentations.
 
+## Augmentation Route For The Next Reset
+
+Goal: minimize duplicate faction reputation work while acquiring hacking and reputation multipliers early.
+
+Recommended city route: choose the eastern cities instead of Sector-12/Aevum.
+
+1. `Tian Di Hui`
+   - Get `Social Negotiation Assistant (S.N.A)` and `ADR-V1 Pheromone Gene` first.
+   - These improve later faction/company reputation gains.
+   - `Speech Processor Implant` and `Nuoptimal Nootropic Injector Implant` are useful when corporation work becomes relevant.
+2. `CyberSec`, but only to about 2,000 reputation
+   - Buy `Neurotrainer I` and `Synaptic Enhancement Implant`.
+   - Stop there: NiteSec supplies the remaining useful CyberSec augmentations.
+   - This cheaply replaces what would otherwise be taken from Aevum.
+3. `NiteSec`
+   - Main early hacking faction.
+   - Covers `BitWire`, Cranial Signal Processors Gen I-III, `Neurotrainer II`, `Embedded Netburner Module`, `Neural-Retention Enhancement`, `CRTX42-AA`, and `Artificial Synaptic Potentiation`.
+   - This makes additional early farming at CyberSec largely redundant.
+4. `Chongqing`
+   - Primary target: `Neuregen Gene Modification` at 37,500 reputation (`+40% Hacking Exp`).
+   - This unique, strong bonus justifies the eastern city route by itself.
+   - `DataJack` can be collected here later if it was not already bought from NiteSec.
+5. `Four Sigma`
+   - Prefer before NWO in a fresh reset when both still require company work.
+   - Get `Neurotrainer III`, then `ADR-V2 Pheromone Gene`.
+   - `ADR-V2` improves both faction and company reputation by 20%, accelerating NWO and later corporations.
+   - `FocusWire` is secondary; postpone it if 75,000 reputation is expensive for only modest hacking experience/company benefits.
+6. `NWO`
+   - Get `Power Recirculation Core`; skip duplicate `Neurotrainer III` if already bought from Four Sigma.
+   - Later, NWO is a strong single source for much of the Embedded Netburner Module upgrade chain.
+7. `The Black Hand`
+   - Most low-reputation hacking augmentations overlap with NiteSec.
+   - Farm only when `The Black Hand`, `Enhanced Myelin Sheathing`, Cranial Signal Processors Gen IV, or another still-unowned higher tier augmentation justifies it.
+8. `BitRunners`
+   - Main late hacking faction and preferred source for the remaining Cranial Signal Processor chain and other high-tier hacking augmentations.
+9. `ECorp`, then `Fulcrum Secret Technologies`
+   - Use ECorp to obtain `PC Direct-Neural Interface`, which unlocks prerequisite-gated Fulcrum augmentations.
+   - Do not grind Fulcrum early when its useful purchases are still blocked.
+
+Usually skip or postpone:
+
+- `Aevum`: its relevant early hacking augmentations are covered by CyberSec plus NiteSec; choosing Chongqing gives the much stronger `Neuregen`.
+- `CyberSec` beyond 2,000 reputation: almost entirely duplicated by NiteSec.
+- `The Syndicate` and `The Dark Army`: useful augmentations exist, but 200 combat stats make them inefficient for an early hacking-focused reset.
+- `Bachman & Associates` and `Clarke Incorporated`: mostly overlap with Four Sigma for `ADR-V2` and `FocusWire`.
+- `MegaCorp`, `ECorp`, `Fulcrum`, and `Blade Industries` at low reputation: `Embedded Netburner Module` is already available from NiteSec.
+- Small 5% bonuses should wait until hacking level and reputation gain make them cheap.
+
+Current-run exception: Chongqing, The Syndicate, and The Dark Army are unavailable or inefficient. Continue with `NWO -> Four Sigma`.
+
 ## Corp Server Backdoors
 
 - ECorp: `ecorp`

@@ -4,7 +4,6 @@ import { DashboardSnapshot } from 'src/models/dashboard-snapshot';
 import { TargetInfo } from '/src/models/target-info';
 import { Table } from '/src/debug/table';
 import { Alignment } from '/src/debug/cell-alignment';
-import { TargetRow } from '/src/debug/reports/target-row';
 import { WorkerJob } from '/src/models/worker-job';
 
 const MONEY_ATTENTION_THRESHOLD = 0.95;

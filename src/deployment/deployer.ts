@@ -51,8 +51,17 @@ export class Deployer
 
     private async deployShareJob(job: WorkerJob, script: string): Promise<void>
     {
-        if (this.hasShareProcess(job.hostname)) {
-            return;
+        const currentThreads = this.context.ns.ps(job.hostname)
+            .filter(process => this.isShareProcess(process.filename))
+            .reduce((sum, process) => sum + process.threads, 0);
+
+        if (currentThreads > 0) {
+            const shareCapacityIsTooLow = currentThreads < job.threads * 0.9;
+            if (!shareCapacityIsTooLow) {
+                return;
+            }
+
+            this.stopShareProcesses(job.hostname);
         }
 
         await this.copyScript(script, job.hostname);

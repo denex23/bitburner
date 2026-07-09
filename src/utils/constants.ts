@@ -35,7 +35,7 @@ export const DASHBOARD_SNAPSHOT_FILE = "/tmp/dashboard-snapshot.txt";
 export const SHARE_TARGET = "Share";
 export const SHARE_RAM_BUFFER = 32;
 
-export const TARGET_HACK_RATIO = 0.30;
+export const TARGET_HACK_RATIO = 0.25;
 export const HACK_SECURITY_INCREASE = 0.002;
 export const GROW_SECURITY_INCREASE = 0.004;
 export const MAX_HACK_THREADS_PER_TARGET = 48;
@@ -43,7 +43,7 @@ export const MAX_HACK_THREADS_PER_TARGET = 48;
 export const FARM_RAM_RATIO = 0.7;
 export const PREP_RAM_RATIO = 0.3;
 
-export const MAX_ACTIVE_BATCHES_PER_TARGET = 6;
+export const MAX_ACTIVE_BATCHES_PER_TARGET = 8;
 export const BATCH_SPACING_MS = 200;
 export const CONTROLLER_INTERVAL_MS = 5000;
 
