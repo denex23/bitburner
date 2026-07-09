@@ -1,8 +1,13 @@
-.agents
-.vscode
-tsconfig.json
+# Folder
+.agents/
+.vscode/
+react/
+react-dom/
+
+# Files
+BitburnerGoFilesync_win.exe
+config.toml
 react.ts
-NetscriptDefinitions.d.ts
-react
-react-dom
-src/dev.ts
+tsconfig.json
+
+dev.ts

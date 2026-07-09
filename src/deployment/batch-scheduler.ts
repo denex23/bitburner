@@ -80,15 +80,9 @@ export class BatchScheduler
 
     private calculateFinishAt(target: TargetInfo, jobs: WorkerJob[]): number
     {
-        const ns = this.context.ns;
-        const server = ns.getServer(target.hostname);
-        const player = ns.getPlayer();
+        const player = this.context.getPlayer();
+        const server = this.context.toFormulaServer(target);
         let longestRuntime = 0;
-
-        server.moneyAvailable = Math.max(1, target.currentMoney);
-        server.moneyMax = target.maxMoney;
-        server.hackDifficulty = target.currentSecurity;
-        server.minDifficulty = target.minSecurity;
 
         for (const job of jobs) {
             longestRuntime = Math.max(

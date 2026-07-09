@@ -23,7 +23,8 @@ export class TargetSelector
                 continue;
             }
 
-            const score = calculateScore(this.context.ns, server);
+            const score = calculateScore(this.context, server);
+            
             if (score <= 0) {
                 continue;
             }

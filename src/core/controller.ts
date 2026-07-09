@@ -27,6 +27,8 @@ export async function main(ns: NS)
     initTail(ns);
 
     while (true) {
+        context.beginTick();
+        
         // Scan & Rooting
         const servers = scanner.scan();
         rooter.root(servers);

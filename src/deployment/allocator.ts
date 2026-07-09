@@ -1,4 +1,3 @@
-import { Server } from "@ns";
 import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
@@ -301,9 +300,8 @@ export class Allocator
     private createActionDelays(target: TargetInfo): Partial<Record<WorkerAction, number>>
     {
         const ns = this.context.ns;
-        const server = this.createServerSnapshot(target);
-        const player = ns.getPlayer();
-
+        const player = this.context.getPlayer();
+        const server = this.context.toFormulaServer(target);
         const hackTime = ns.formulas.hacking.hackTime(server, player);
         const growTime = ns.formulas.hacking.growTime(server, player);
         const weakenTime = ns.formulas.hacking.weakenTime(server, player);
@@ -384,8 +382,8 @@ export class Allocator
     private calculateFarmPlan(target: TargetInfo, hackThreads: number): FarmPlan
     {
         const ns = this.context.ns;
-        const server = this.createServerSnapshot(target);
-        const player = ns.getPlayer();
+        const player = this.context.getPlayer();
+        const server = this.context.toFormulaServer(target);
         const hackRatio = Math.min(TARGET_HACK_RATIO, ns.formulas.hacking.hackPercent(server, player) * hackThreads);
 
         server.moneyAvailable = Math.max(1, target.currentMoney * (1 - hackRatio));
@@ -435,8 +433,8 @@ export class Allocator
 
     private calculateHackThreads(target: TargetInfo): number 
     {
-        const server = this.createServerSnapshot(target);
-        const player = this.context.ns.getPlayer();
+        const player = this.context.getPlayer();
+        const server = this.context.toFormulaServer(target);
         const hackRatioPerThread = this.context.ns.formulas.hacking.hackPercent(server, player);
 
         if (hackRatioPerThread <= 0) {
@@ -463,8 +461,8 @@ export class Allocator
 
     private calculateGrowThreads(target: TargetInfo): number 
     {
-        const server = this.createServerSnapshot(target);
-        const player = this.context.ns.getPlayer();
+        const player = this.context.getPlayer();
+        const server = this.context.toFormulaServer(target);
 
         if (target.currentMoney >= target.maxMoney) {
             return 0;
@@ -481,17 +479,5 @@ export class Allocator
     private calculateGrowSecurityIncrease(threads: number): number
     {
         return threads * GROW_SECURITY_INCREASE;
-    }
-
-    private createServerSnapshot(target: TargetInfo): Server
-    {
-        const server = this.context.ns.getServer(target.hostname);
-
-        server.moneyAvailable = Math.max(1, target.currentMoney);
-        server.moneyMax = target.maxMoney;
-        server.hackDifficulty = target.currentSecurity;
-        server.minDifficulty = target.minSecurity;
-
-        return server;
     }
 }
