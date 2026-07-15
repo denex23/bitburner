@@ -22,6 +22,8 @@ export async function main(ns: NS): Promise<void>
     ns.ui.setTailTitle("Dashboard");
     ns.ui.resizeTail(1000, 900);
 
+    const snapshotHistory: DashboardSnapshot[] = [];
+
     while (true) {
         ns.clearLog();
 
@@ -29,12 +31,15 @@ export async function main(ns: NS): Promise<void>
 
         if (!content) {
             ns.print("Waiting for snapshot...");
-            return;
+            await ns.sleep(1000);
+            continue;
         }
 
         const snapshot = JSON.parse(content) as DashboardSnapshot;
+        addSnapshotToHistory(snapshotHistory, snapshot);
+
         printPlayerStats(ns);
-        printSummary(ns, snapshot);
+        printSummary(ns, snapshot, snapshotHistory);
         printAttentionTarget(ns, snapshot.targets);
         printFarmTarget(ns, snapshot.targets);
         printPrepTarget(ns, snapshot.targets, snapshot.jobs);
@@ -52,10 +57,20 @@ function printPlayerStats(ns: NS): void
     ns.print(`Money: ${ns.format.number(player.money)}€`);
 }
 
-function printSummary(ns: NS, snapshot: DashboardSnapshot): void
+function printSummary(ns: NS, snapshot: DashboardSnapshot, snapshotHistory: DashboardSnapshot[]): void
 {
+    const currentIncomePerSecond = calculateHackingIncomePerSecond(snapshotHistory.at(-2),snapshotHistory.at(-1));
+    const averageIncomePerSecond = calculateHackingIncomePerSecond(snapshotHistory.at(0),snapshotHistory.at(-1));
+    const shareJobs = filterShareJobs(snapshot.jobs);
+    const shareThreads = shareJobs.reduce((sum, job) => sum + job.threads, 0);
+    const shareRam = shareJobs.reduce((sum, job) => sum + job.allocatedRam, 0);
+
     printSection(ns, "Summary");
-    ns.print(`Updated: ${snapshot.createdAt.toLocaleString("de-DE") }`)
+    ns.print(`Updated: ${new Date(snapshot.createdAt).toLocaleString("de-DE")}`);
+    ns.print(`Hacking current: ${ns.format.number(currentIncomePerSecond)}/s`);
+    ns.print(`Hacking 60s avg: ${ns.format.number(averageIncomePerSecond)}/s`);
+    ns.print(`Share planned: ${ns.format.number(shareThreads)} threads, ${ns.format.ram(shareRam)}`);
+    ns.print(`Share running: ${ns.format.number(snapshot.runningShareThreads)} threads, ` + ns.format.ram(snapshot.runningShareRam));
     ns.print(`RAM: ${ns.format.ram(snapshot.plannedRam)} / ${ns.format.ram(snapshot.totalWorkerRam)} planned, ${ns.format.ram(snapshot.availableWorkerRam)} free`);
     ns.print(`Targets: ${filterFarmTargets(snapshot.targets).length} farm, ${filterPrepTargets(snapshot.targets).length} prep, ${filterAttentionTargets(snapshot.targets).length} attention`);
     ns.print(`Jobs: ${snapshot.jobs.length} total, ${filterShareJobs(snapshot.jobs).length} share`);
@@ -202,6 +217,25 @@ function formatDuration(milliseconds: number): string
     return `${seconds}s`;
 }
 
+const INCOME_HISTORY_MS = 60_000;
+
+function addSnapshotToHistory(history: DashboardSnapshot[], snapshot: DashboardSnapshot): void
+{
+    const latestSnapshot = history.at(-1);
+
+    if (latestSnapshot?.createdAt === snapshot.createdAt) {
+        return;
+    }
+
+    history.push(snapshot);
+
+    const oldestAllowedTimestamp = snapshot.createdAt - INCOME_HISTORY_MS;
+
+    while (history.length > 1 && history[0].createdAt < oldestAllowedTimestamp) {
+        history.shift();
+    }
+}
+
 function calculateRemainingRuntime(ns: NS, target: TargetInfo, jobs: WorkerJob[]): number
 {
     const latestFinishAt = jobs
@@ -246,6 +280,23 @@ function calculateJobRuntime(ns: NS, target: TargetInfo, action: WorkerAction): 
     }
 
     return 0;
+}
+
+function calculateHackingIncomePerSecond(startSnapshot?: DashboardSnapshot, endSnapshot?: DashboardSnapshot): number
+{
+    if (undefined === startSnapshot || undefined === endSnapshot) {
+        return 0;
+    }
+
+    const elapsedMs = endSnapshot.createdAt - startSnapshot.createdAt;
+
+    if (elapsedMs <= 0) {
+        return 0;
+    }
+
+    const income = endSnapshot.hackingIncome - startSnapshot.hackingIncome;
+
+    return income / elapsedMs * 1000;
 }
 
 function filterShareJobs(jobs: WorkerJob[]): WorkerJob[]

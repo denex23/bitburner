@@ -12,7 +12,7 @@ import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
 import { DashboardSnapshotWriter } from 'src/data/dshboard-writer';
 import { DashboardSnapshot } from 'src/models/dashboard-snapshot';
 
-export async function main(ns: NS) 
+export async function main(ns: NS)
 {
     const context = new Context(ns)
     const debugReporter = new DebugReporter(context);
@@ -28,7 +28,7 @@ export async function main(ns: NS)
 
     while (true) {
         context.beginTick();
-        
+
         // Scan & Rooting
         const servers = scanner.scan();
         rooter.root(servers);
@@ -56,13 +56,18 @@ export async function main(ns: NS)
             0
         );
 
+        const runningShare = debugReporter.getRunningShareMetrics(servers);
+
         const snapshot: DashboardSnapshot = {
             createdAt: Date.now(),
+            hackingIncome: ns.getMoneySources().sinceStart.hacking,
+            runningShareThreads: runningShare.threads,
+            runningShareRam: runningShare.ram,
             totalWorkerRam,
             availableWorkerRam,
             plannedRam,
             targets,
-            jobs: protectedJobs,
+            jobs: jobs,
         };
 
         // Refresh server/worker

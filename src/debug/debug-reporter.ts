@@ -6,7 +6,7 @@ import { Context } from "src/models/context";
 import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
-import { TargetState, WorkerAction } from "src/utils/constants";
+import { SCRIPT_MAP, TargetState, WorkerAction } from "src/utils/constants";
 
 export class DebugReporter 
 {
@@ -252,6 +252,27 @@ export class DebugReporter
         }
 
         this.printTable(table);
+    }
+
+    public getRunningShareMetrics(servers: ServerInfo[]): {threads: number; ram: number;}
+    {
+        const shareScript = SCRIPT_MAP[WorkerAction.Share];
+        let threads = 0;
+        let ram = 0;
+
+        for (const server of servers) {
+            for (const process of this.context.ns.ps(server.hostname)) {
+                if (process.filename !== shareScript) {
+                    continue;
+                }
+
+                threads += process.threads;
+                ram += process.threads
+                    * this.context.ns.getScriptRam(shareScript, server.hostname);
+            }
+        }
+
+        return { threads, ram };
     }
 
     private formatActions(actions: string[]): string

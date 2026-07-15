@@ -4,6 +4,9 @@ import { WorkerJob } from "src/models/worker-job";
 export interface DashboardSnapshot
 {
     createdAt: number;
+    hackingIncome: number;
+    runningShareThreads: number;
+    runningShareRam: number;
     totalWorkerRam: number;
     availableWorkerRam: number;
     plannedRam: number;
