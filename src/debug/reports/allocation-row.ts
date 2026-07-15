@@ -3,8 +3,10 @@ import { WorkerAction } from "src/utils/constants";
 export interface AllocationRow
 {
     target: string;
+    batches: number;
+    operations: number;
     actions: WorkerAction[];
-    workers: number;
+    processes: number;
     threadsByAction: Partial<Record<WorkerAction, number>>;
     ram: number;
     minDelayMs: number;

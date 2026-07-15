@@ -81,36 +81,51 @@ export class DebugReporter
 
     private reportAllocation(jobs: WorkerJob[]): void
     {
-        this.printAllocation(this.buildAllocationReport(jobs))
+        this.printAllocation(this.buildAllocationReport(jobs));
     }
 
     private buildAllocationReport(jobs: WorkerJob[]): AllocationRow[]
     {
         const rows = new Map<string, AllocationRow>();
+        const batchIdsByTarget = new Map<string, Set<string>>();
+        const operationKeysByTarget = new Map<string, Set<string>>();
 
         for (const job of jobs) {
-            const delayMs = job.delayMs ?? 0;
+            const batchIds = batchIdsByTarget.get(job.target) ?? new Set<string>();
+            const operationKeys = operationKeysByTarget.get(job.target) ?? new Set<string>();
+
+            if (undefined !== job.batchId) {
+                batchIds.add(job.batchId);
+                operationKeys.add(`${job.batchId}|${job.action}|${job.delayMs}`);
+            }
+
+            batchIdsByTarget.set(job.target, batchIds);
+            operationKeysByTarget.set(job.target, operationKeys);
             const row = rows.get(job.target);
 
             if (row) {
-                row.workers++;
+                row.batches = batchIds.size;
+                row.operations = operationKeys.size;
+                row.processes++;
                 row.actions = (row.actions.includes(job.action)) ? row.actions : [...row.actions, job.action];
-                row.threadsByAction[job.action] = (row.threadsByAction[job.action] ?? 0) + job.threads;;
+                row.threadsByAction[job.action] = (row.threadsByAction[job.action] ?? 0) + job.threads;
                 row.ram += job.allocatedRam;
-                row.minDelayMs = Math.min(row.minDelayMs, delayMs);
-                row.maxDelayMs = Math.max(row.maxDelayMs, delayMs);
+                row.minDelayMs = Math.min(row.minDelayMs, job.delayMs);
+                row.maxDelayMs = Math.max(row.maxDelayMs, job.delayMs);
 
                 continue;
             }
 
             rows.set(job.target, {
                 target: job.target,
+                batches: batchIds.size,
+                operations: operationKeys.size,
                 actions: [job.action],
-                workers: 1,
+                processes: 1,
                 threadsByAction: { [job.action]: job.threads },
                 ram: job.allocatedRam,
-                minDelayMs: delayMs,
-                maxDelayMs: delayMs,
+                minDelayMs: job.delayMs,
+                maxDelayMs: job.delayMs,
             });
         }
 
@@ -124,8 +139,10 @@ export class DebugReporter
 
         const table = new Table()
             .column("Target")
-            .column("Actions")
-            .column("Workers", undefined, Alignment.Right)
+            .column("Batches", undefined, Alignment.Right)
+            .column("Operations", undefined, Alignment.Right)
+            .column("Action types")
+            .column("Processes", undefined, Alignment.Right)
             .column("Threads", undefined, Alignment.Right)
             .column("Delay", undefined, Alignment.Right)
             .column("RAM", undefined, Alignment.Right);
@@ -133,8 +150,10 @@ export class DebugReporter
         for (const row of rows) {
             table.row(
                 row.target,
+                row.batches.toString(),
+                row.operations.toString(),
                 this.formatActions(row.actions),
-                row.workers.toString(),
+                row.processes.toString(),
                 this.formatThreadsByAction(row.threadsByAction),
                 this.formatDelay(row.minDelayMs, row.maxDelayMs),
                 ns.format.ram(row.ram)
