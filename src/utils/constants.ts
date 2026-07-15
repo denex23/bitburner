@@ -43,8 +43,8 @@ export const MAX_HACK_THREADS_PER_TARGET = 48;
 export const FARM_RAM_RATIO = 0.7;
 export const PREP_RAM_RATIO = 0.3;
 
-export const MAX_ACTIVE_BATCHES_PER_TARGET = 8;
-export const BATCH_SPACING_MS = 200;
+export const MAX_ACTIVE_BATCHES_PER_TARGET = 4;
+export const BATCH_SPACING_MS = 300;
 export const CONTROLLER_INTERVAL_MS = 5000;
 
 export const FACTION_SERVERS = [
@@ -52,6 +52,8 @@ export const FACTION_SERVERS = [
     "avmnite-02h",
     "I.I.I.I",
     "run4theh111z",
+    "The-Cave",
+    //"w0r1d_d43m0n", // just in the list to remember the right spelling :D
 ];
 
 export const CORPORATION_SERVERS = [

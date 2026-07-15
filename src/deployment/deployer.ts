@@ -4,11 +4,15 @@ import { WorkerJob } from "src/models/worker-job";
 import { SCRIPT_MAP, WorkerAction } from 'src/utils/constants';
 import { isWorkerServer } from 'src/deployment/worker-helper';
 
-export class Deployer 
+type BatchWorkerJob = WorkerJob & {
+    batchId: string;
+};
+
+export class Deployer
 {
     private readonly workerScripts: Set<string>;
 
-    constructor(private readonly context: Context) 
+    constructor(private readonly context: Context)
     {
         this.workerScripts = new Set<string>(Object.values(SCRIPT_MAP));
     }
@@ -27,16 +31,24 @@ export class Deployer
         }
     }
 
-    private async deployJob(job: WorkerJob): Promise<void> 
+    private async deployJob(job: WorkerJob): Promise<void>
     {
         const script = SCRIPT_MAP[job.action];
 
-        if (!this.isScriptAvailable(script)) {
+        if (false === this.isScriptAvailable(script)) {
             return;
         }
 
         if (WorkerAction.Share === job.action) {
             await this.deployShareJob(job, script);
+            return;
+        }
+
+        if (false === this.hasBatchId(job)) {
+            this.context.ns.tprint(
+                `[INVALID JOB] Missing batchId: ${job.hostname} -> ${job.action} ${job.target}`
+            );
+
             return;
         }
 
@@ -57,7 +69,7 @@ export class Deployer
 
         if (currentThreads > 0) {
             const shareCapacityIsTooLow = currentThreads < job.threads * 0.9;
-            if (!shareCapacityIsTooLow) {
+            if (false === shareCapacityIsTooLow) {
                 return;
             }
 
@@ -88,75 +100,107 @@ export class Deployer
     private executeJob(job: WorkerJob, script: string): void
     {
         const ns = this.context.ns;
+        const scriptArguments: (string | number)[] = [
+            job.target,
+            job.delayMs,
+        ];
 
-        const pid = ns.exec(
+        if (WorkerAction.Share !== job.action) {
+            if (this.hasBatchId(job)) {
+                scriptArguments.push(job.batchId);
+            } else {
+                return;
+            }
+        }
+
+        const processId = ns.exec(
             script,
             job.hostname,
             job.threads,
-            job.target,
-            job.delayMs ?? 0,
+            ...scriptArguments,
         );
 
-        if (pid !== 0) {
+        if (processId !== 0) {
             return;
         }
 
         this.reportDeployFailure(job, script);
     }
 
-    private getWorkers(servers: ServerInfo[]): ServerInfo[] 
+    private getWorkers(servers: ServerInfo[]): ServerInfo[]
     {
         return servers.filter(server => isWorkerServer(server));
     }
 
-    private createDesiredJobKeys(jobs: WorkerJob[]): Set<string> 
+    private createDesiredJobKeys(jobs: WorkerJob[]): Set<string>
     {
-        return new Set(jobs.map(job =>
-            this.createJobKey(job.hostname, SCRIPT_MAP[job.action], job.target, job.threads, job.delayMs ?? 0)
-        ));
+        const desiredJobKeys = new Set<string>();
+
+        for (const job of jobs) {
+            if (WorkerAction.Share === job.action || false === this.hasBatchId(job)) {
+                continue;
+            }
+
+            desiredJobKeys.add(this.createJobKey(
+                job.hostname,
+                SCRIPT_MAP[job.action],
+                job.target,
+                job.threads,
+                job.delayMs,
+                job.batchId,
+            ));
+        }
+
+        return desiredJobKeys;
     }
 
-    private createJobKey(hostname: string, script: string, target: string, threads: number, delayMs: number = 0): string 
+    private createJobKey(hostname: string, script: string, target: string, threads: number, delayMs: number, batchId: string): string
     {
-        return `${hostname}|${script}|${target}|${threads}|${delayMs}`;
+        return `${hostname}|${script}|${target}|${threads}|${delayMs}|${batchId}`;
     }
 
-    private isJobRunning(job: WorkerJob, script: string): boolean 
+    private isJobRunning(job: BatchWorkerJob, script: string): boolean
     {
         return this.context.ns.ps(job.hostname).some(process =>
-            process.filename === script &&
-            process.threads === job.threads &&
-            String(process.args[0] ?? "") === job.target &&
-            Number(process.args[1] ?? 0) === (job.delayMs ?? 0)
+            process.filename === script
+            && process.threads === job.threads
+            && String(process.args[0] ?? "") === job.target
+            && Number(process.args[1] ?? 0) === job.delayMs
+            && String(process.args[2] ?? "") === job.batchId
         );
     }
 
-    private stopObsoleteProcesses(worker: ServerInfo, desiredJobs: Set<string>): void 
+    private hasBatchId(job: WorkerJob): job is BatchWorkerJob
+    {
+        return undefined !== job.batchId && job.batchId.length > 0;
+    }
+
+    private stopObsoleteProcesses(worker: ServerInfo, desiredJobs: Set<string>): void
     {
         for (const process of this.context.ns.ps(worker.hostname)) {
-            if (!this.isWorkerScript(process.filename)) {
+            if (false === this.isWorkerScript(process.filename)) {
                 continue;
             }
 
             if (this.isShareProcess(process.filename)) {
                 continue;
             }
-            
-            const target = String(process.args[0] ?? "");
-            const delayMs = Number(process.args[1] ?? 0);
-            const jobKey = this.createJobKey(worker.hostname, process.filename, target, process.threads, delayMs);
 
-            if (!desiredJobs.has(jobKey)) {
+            const target = String(process.args[0]);
+            const delayMs = Number(process.args[1]);
+            const batchId = process.args[2];
+
+            if ("string" !== typeof batchId || batchId.length <= 0) {
+                this.context.ns.kill(process.pid);
+                continue;
+            }
+
+            const jobKey = this.createJobKey(worker.hostname, process.filename, target, process.threads, delayMs, batchId);
+
+            if (false === desiredJobs.has(jobKey)) {
                 this.context.ns.kill(process.pid);
             }
         }
-    }
-
-    private hasShareProcess(hostname: string): boolean
-    {
-        return this.context.ns.ps(hostname).some(process =>
-            this.isShareProcess(process.filename)
-        );
     }
 
     private freeRamForJob(job: WorkerJob, script: string): void
@@ -171,7 +215,7 @@ export class Deployer
         this.stopShareProcesses(job.hostname);
     }
 
-    private stopShareProcesses(host: string): void 
+    private stopShareProcesses(host: string): void
     {
         this.context.ns.scriptKill(SCRIPT_MAP[WorkerAction.Share], host);
     }

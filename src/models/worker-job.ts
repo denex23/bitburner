@@ -8,5 +8,6 @@ export interface WorkerJob
     threads: number;
     allocatedRam: number;
     createdAt: number;
-    delayMs?: number;
+    delayMs: number;
+    batchId?: string;
 }

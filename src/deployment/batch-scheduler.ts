@@ -1,10 +1,11 @@
-import { Server } from "@ns";
+import { Server, Player } from "@ns";
 import { Context } from "src/models/context";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
 import { WorkerAction, MAX_ACTIVE_BATCHES_PER_TARGET, TargetState } from "src/utils/constants";
 
 type ActiveBatch = {
+    batchId: string;
     target: string;
     finishAt: number;
     jobs: WorkerJob[];
@@ -13,6 +14,7 @@ type ActiveBatch = {
 export class BatchScheduler
 {
     private readonly activeBatches = new Map<string, ActiveBatch[]>();
+    private nextBatchSequence = 1;
 
     constructor(private readonly context: Context) {}
 
@@ -29,6 +31,7 @@ export class BatchScheduler
     {
         this.removeFinishedBatches();
 
+        const registeredAt = Date.now();
         const targetsByHostname = new Map(targets.map(target => [target.hostname, target]));
         const jobsByTarget = this.groupBatchJobsByTarget(jobs);
 
@@ -45,7 +48,14 @@ export class BatchScheduler
                 continue;
             }
 
+            const batchId = this.createBatchId(target, registeredAt);
+
+            for (const job of targetJobs) {
+                job.batchId = batchId;
+            }
+
             this.activeBatches.set(target, [...targetBatches, {
+                batchId,
                 target,
                 finishAt: this.calculateFinishAt(targetInfo, targetJobs),
                 jobs: targetJobs,
@@ -78,6 +88,15 @@ export class BatchScheduler
         return jobsByTarget;
     }
 
+    private createBatchId(target: string, registeredAt: number): string
+    {
+        const batchId = `${target}:${registeredAt}:${this.nextBatchSequence}`;
+
+        this.nextBatchSequence++;
+
+        return batchId;
+    }
+
     private calculateFinishAt(target: TargetInfo, jobs: WorkerJob[]): number
     {
         const player = this.context.getPlayer();
@@ -87,14 +106,14 @@ export class BatchScheduler
         for (const job of jobs) {
             longestRuntime = Math.max(
                 longestRuntime,
-                (job.delayMs ?? 0) + this.calculateActionTime(job.action, server, player),
+                job.delayMs + this.calculateActionTime(job.action, server, player),
             );
         }
 
         return Date.now() + longestRuntime;
     }
 
-    private calculateActionTime(action: WorkerAction, server: Server, player: ReturnType<Context["ns"]["getPlayer"]>): number
+    private calculateActionTime(action: WorkerAction, server: Server, player: Player): number
     {
         if (WorkerAction.Hack === action) {
             return this.context.ns.formulas.hacking.hackTime(server, player);
