@@ -1,22 +1,28 @@
-import { Server, Player } from "@ns";
 import { Context } from "src/models/context";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
+import { ScheduledBatchOperation } from "src/models/scheduled-batch-operation";
 import { WorkerAction, MAX_ACTIVE_BATCHES_PER_TARGET, TargetState } from "src/utils/constants";
+import { ScheduledOperationFragment } from "src/models/scheduled-operation-fragment";
+import { TargetSimulator } from "src/deployment/target-simulator";
 
 type ActiveBatch = {
     batchId: string;
     target: string;
     finishAt: number;
     jobs: WorkerJob[];
+    operations: ScheduledBatchOperation[];
 };
 
 export class BatchScheduler
 {
+    private readonly targetSimulator: TargetSimulator;
     private readonly activeBatches = new Map<string, ActiveBatch[]>();
     private nextBatchSequence = 1;
 
-    constructor(private readonly context: Context) {}
+    constructor(private readonly context: Context) {
+        this.targetSimulator = new TargetSimulator(context);
+    }
 
     public getAvailableTargets(targets: TargetInfo[]): TargetInfo[]
     {
@@ -27,7 +33,7 @@ export class BatchScheduler
         );
     }
 
-    public register(jobs: WorkerJob[], targets: TargetInfo[]): void
+    public register(jobs: WorkerJob[], targets: TargetInfo[], pendingOperations: ScheduledBatchOperation[]): void
     {
         this.removeFinishedBatches();
 
@@ -54,13 +60,35 @@ export class BatchScheduler
                 job.batchId = batchId;
             }
 
+            const operations = this.createScheduledOperations(
+                batchId,
+                target,
+                targetInfo,
+                targetJobs,
+                registeredAt,
+                pendingOperations,
+            );
+
             this.activeBatches.set(target, [...targetBatches, {
                 batchId,
                 target,
-                finishAt: this.calculateFinishAt(targetInfo, targetJobs),
+                finishAt: this.calculateFinishAt(operations, registeredAt),
                 jobs: targetJobs,
+                operations,
             }]);
         }
+    }
+
+    public getPendingOperations(): ScheduledBatchOperation[]
+    {
+        this.removeFinishedBatches();
+
+        const now = Date.now();
+
+        return [...this.activeBatches.values()]
+            .flatMap(batches => batches)
+            .flatMap(batch => batch.operations)
+            .filter(operation => operation.landingAt > now);
     }
 
     public getProtectedJobs(jobs: WorkerJob[]): WorkerJob[]
@@ -68,6 +96,88 @@ export class BatchScheduler
         this.removeFinishedBatches();
 
         return this.getActiveBatchJobs();
+    }
+
+    private createScheduledOperations(
+        batchId: string,
+        target: string,
+        targetInfo: TargetInfo,
+        jobs: WorkerJob[],
+        registeredAt: number,
+        pendingOperations: ScheduledBatchOperation[],
+    ): ScheduledBatchOperation[]
+    {
+        const operationsByKey = new Map<string, ScheduledBatchOperation>();
+
+        for (const job of jobs) {
+            const operationKey = `${job.action}|${job.delayMs}`;
+            const operation = operationsByKey.get(operationKey);
+            const fragment: ScheduledOperationFragment = {
+                hostname: job.hostname,
+                threads: job.threads,
+                cpuCores: this.context.getServer(job.hostname).cpuCores,
+            };
+
+            if (undefined !== operation) {
+                operation.threads += job.threads;
+                operation.fragments.push(fragment);
+
+                continue;
+            }
+
+            const startsAt = registeredAt + job.delayMs;
+
+            operationsByKey.set(operationKey, {
+                batchId,
+                target,
+                action: job.action,
+                threads: job.threads,
+                startsAt,
+                landingAt: startsAt + this.targetSimulator.calculateActionTimeAt(
+                    targetInfo,
+                    pendingOperations,
+                    job.action,
+                    startsAt,
+                ),
+                fragments: [fragment],
+            });
+        }
+
+        return this.calculateLandingTimes(
+            targetInfo,
+            pendingOperations,
+            [...operationsByKey.values()],
+        );
+    }
+
+    private calculateLandingTimes(
+        target: TargetInfo,
+        pendingOperations: ScheduledBatchOperation[],
+        operations: ScheduledBatchOperation[],
+    ): ScheduledBatchOperation[]
+    {
+        const timelineOperations = pendingOperations.filter(operation => operation.target === target.hostname);
+        const operationsByStart = [...operations].sort((left, right) => left.startsAt - right.startsAt);
+        const scheduledOperations: ScheduledBatchOperation[] = [];
+
+        for (const operation of operationsByStart) {
+            const scheduledOperation = {
+                ...operation,
+                landingAt: operation.startsAt
+                    + this.targetSimulator.calculateActionTimeAt(
+                        target,
+                        timelineOperations,
+                        operation.action,
+                        operation.startsAt,
+                    ),
+            };
+
+            timelineOperations.push(scheduledOperation);
+            scheduledOperations.push(scheduledOperation);
+        }
+
+        return scheduledOperations
+            .sort((left, right) => left.landingAt - right.landingAt);
     }
 
     private groupBatchJobsByTarget(jobs: WorkerJob[]): Map<string, WorkerJob[]>
@@ -97,37 +207,11 @@ export class BatchScheduler
         return batchId;
     }
 
-    private calculateFinishAt(target: TargetInfo, jobs: WorkerJob[]): number
+    private calculateFinishAt(operations: ScheduledBatchOperation[], registeredAt: number): number
     {
-        const player = this.context.getPlayer();
-        const server = this.context.toFormulaServer(target);
-        let longestRuntime = 0;
-
-        for (const job of jobs) {
-            longestRuntime = Math.max(
-                longestRuntime,
-                job.delayMs + this.calculateActionTime(job.action, server, player),
-            );
-        }
-
-        return Date.now() + longestRuntime;
-    }
-
-    private calculateActionTime(action: WorkerAction, server: Server, player: Player): number
-    {
-        if (WorkerAction.Hack === action) {
-            return this.context.ns.formulas.hacking.hackTime(server, player);
-        }
-
-        if (WorkerAction.Grow === action) {
-            return this.context.ns.formulas.hacking.growTime(server, player);
-        }
-
-        if (WorkerAction.Weaken === action) {
-            return this.context.ns.formulas.hacking.weakenTime(server, player);
-        }
-
-        return 0;
+        return operations.reduce(
+            (latestLandingAt, operation) => Math.max(latestLandingAt, operation.landingAt), registeredAt
+        );
     }
 
     private getMaxActiveBatches(target: TargetInfo): number

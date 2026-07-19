@@ -36,8 +36,9 @@ export async function main(ns: NS)
         // Plan
         const targets = selector.select(servers);
         const availableTargets = batchScheduler.getAvailableTargets(targets);
-        const jobs = allocator.allocate(servers, availableTargets);
-        batchScheduler.register(jobs, targets);
+        const pendingOperations = batchScheduler.getPendingOperations();
+        const jobs = allocator.allocate(servers, availableTargets, pendingOperations);
+        batchScheduler.register(jobs, targets, pendingOperations);
         const protectedJobs = batchScheduler.getProtectedJobs(jobs);
 
         const totalWorkerRam = servers
@@ -47,8 +48,7 @@ export async function main(ns: NS)
         const availableWorkerRam = servers
             .filter(server => isWorkerServer(server))
             .reduce((sum, server) => sum + Math.max(
-                0,
-                getWorkerRam(server) - ns.getServerUsedRam(server.hostname)
+                0, getWorkerRam(server) - ns.getServerUsedRam(server.hostname)
             ), 0);
 
         const plannedRam = protectedJobs.reduce(

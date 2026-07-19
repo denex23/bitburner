@@ -1,20 +1,25 @@
+import { Server } from "@ns";
 import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
-import { calculateSecurityDelta } from 'src/utils/calculation-helper';
 import { WorkerAllocation } from 'src/models/worker-allocation';
 import { isWorkerServer, getWorkerRam } from 'src/deployment/worker-helper';
-import { 
-    SCRIPT_RAM, 
+import { ScheduledBatchOperation } from 'src/models/scheduled-batch-operation';
+import { TargetSimulator } from "src/deployment/target-simulator";
+import {
+    calculateSecurityDelta,
+    calculateHackSecurityIncrease,
+    calculateGrowSecurityIncrease,
+} from 'src/utils/calculation-helper';
+import {
+    SCRIPT_RAM,
     SCRIPT_MAP,
-    TARGET_ACTION, 
-    TARGET_HACK_RATIO, 
-    HACK_SECURITY_INCREASE, 
-    GROW_SECURITY_INCREASE, 
-    BATCH_SPACING_MS, 
-    MAX_HACK_THREADS_PER_TARGET, 
-    FARM_RAM_RATIO, 
+    TARGET_ACTION,
+    TARGET_HACK_RATIO,
+    BATCH_SPACING_MS,
+    MAX_HACK_THREADS_PER_TARGET,
+    FARM_RAM_RATIO,
     PREP_RAM_RATIO,
     SHARE_RAM_BUFFER,
     SHARE_TARGET,
@@ -22,32 +27,59 @@ import {
     WorkerAction,
 } from 'src/utils/constants';
 
-type FarmPlan = {
-    hackThreads: number;
-    growThreads: number;
-    hackWeakenThreads: number;
-    growWeakenThreads: number;
-    totalRam: number;
-}
+const MAX_TIMELINE_CALCULATION_ATTEMPTS = 10;
+const TIMELINE_TOLERANCE_MS = 1;
+
+type FarmThreads = {
+    hack: number;
+    weakenAfterHack: number;
+    grow: number;
+    weakenAfterGrow: number;
+};
 
 type FarmDelays = {
     hack: number;
-    hackWeaken: number;
+    weakenAfterHack: number;
     grow: number;
-    growWeaken: number;
-}
+    weakenAfterGrow: number;
+};
+
+type FarmPlan = {
+    threads: FarmThreads;
+    delays: FarmDelays;
+    totalRam: number;
+};
+
+type PrepThreads = {
+    grow: number;
+    weaken: number;
+};
+
+type PrepDelays = {
+    grow: number;
+    weaken: number;
+};
 
 type PrepPlan = {
-    growThreads: number;
-    weakenThreads: number;
+    threads: PrepThreads;
+    delays: PrepDelays;
     totalRam: number;
-}
+};
 
-export class Allocator 
+export class Allocator
 {
-    constructor(private readonly context: Context) {}
+    private readonly targetSimulator: TargetSimulator;
 
-    public allocate(servers: ServerInfo[], targets: TargetInfo[]): WorkerJob[] 
+    constructor(private readonly context: Context)
+    {
+        this.targetSimulator = new TargetSimulator(context);
+    }
+
+    public allocate(
+        servers: ServerInfo[],
+        targets: TargetInfo[],
+        pendingOperations: ScheduledBatchOperation[],
+    ): WorkerJob[]
     {
         const jobs: WorkerJob[] = [];
         const workerAllocations = this.getWorkerAllocations(servers);
@@ -55,8 +87,8 @@ export class Allocator
         const prepTargets = this.getTargetsExceptState(targets, TargetState.Farm);
         const totalRam = this.calculateTotalAvailableRam(workerAllocations);
 
-        this.allocateWorker(workerAllocations, farmTargets, jobs, totalRam * FARM_RAM_RATIO);
-        this.allocateWorker(workerAllocations, prepTargets, jobs, totalRam * PREP_RAM_RATIO);
+        this.allocateWorker(workerAllocations, farmTargets, jobs, pendingOperations, totalRam * FARM_RAM_RATIO);
+        this.allocateWorker(workerAllocations, prepTargets, jobs, pendingOperations, totalRam * PREP_RAM_RATIO);
         this.allocateShare(workerAllocations, jobs);
 
         return jobs;
@@ -107,7 +139,13 @@ export class Allocator
         };
     }
 
-    private allocateWorker(workers: WorkerAllocation[], targets: TargetInfo[], jobs: WorkerJob[], ramBudget: number): void 
+    private allocateWorker(
+        workers: WorkerAllocation[],
+        targets: TargetInfo[],
+        jobs: WorkerJob[],
+        pendingOperations: ScheduledBatchOperation[],
+        ramBudget: number
+    ): void
     {
         if (targets.length === 0) {
             return;
@@ -120,9 +158,9 @@ export class Allocator
             const firstTargetJobIndex = jobs.length;
 
             if (TargetState.Farm === target.state) {
-                this.allocateFarmTarget(workers, jobs, target, remainingRam);
+                this.allocateFarmTarget(workers, jobs, pendingOperations, target, remainingRam);
             } else if (TargetState.Grow === target.state) {
-                this.allocatePrepTarget(workers, jobs, target, remainingRam);
+                this.allocatePrepTarget(workers, jobs, pendingOperations, target, remainingRam);
             } else {
                 this.allocateTarget(workers, jobs, target, action, remainingRam);
             }
@@ -139,7 +177,7 @@ export class Allocator
         }
     }
 
-    private allocateTarget(workers: WorkerAllocation[], jobs: WorkerJob[], target: TargetInfo, action: WorkerAction, allowedRam: number): void 
+    private allocateTarget(workers: WorkerAllocation[], jobs: WorkerJob[], target: TargetInfo, action: WorkerAction, allowedRam: number): void
     {
         this.allocateThreads(
             workers,
@@ -150,15 +188,20 @@ export class Allocator
         );
     }
 
-    private allocateFarmTarget(workers: WorkerAllocation[], jobs: WorkerJob[], target: TargetInfo, allowedRam: number): void
+    private allocateFarmTarget(
+        workers: WorkerAllocation[],
+        jobs: WorkerJob[],
+        pendingOperations: ScheduledBatchOperation[],
+        target: TargetInfo,
+        allowedRam: number
+    ): void
     {
-        const plan = this.createFarmPlan(target, allowedRam);
+        const plan = this.createFarmPlan(target, allowedRam, pendingOperations);
 
         if (null === plan) {
             return;
         }
 
-        const delays = this.createFarmDelays(target);
         const plannedWorkers = this.cloneWorkerAllocations(workers);
         const plannedJobs: WorkerJob[] = [];
 
@@ -167,8 +210,8 @@ export class Allocator
             plannedJobs,
             target,
             WorkerAction.Hack,
-            plan.hackThreads,
-            delays.hack,
+            plan.threads.hack,
+            plan.delays.hack,
         )) {
             return;
         }
@@ -178,8 +221,8 @@ export class Allocator
             plannedJobs,
             target,
             WorkerAction.Weaken,
-            plan.hackWeakenThreads,
-            delays.hackWeaken,
+            plan.threads.weakenAfterHack,
+            plan.delays.weakenAfterHack,
         )) {
             return;
         }
@@ -189,8 +232,8 @@ export class Allocator
             plannedJobs,
             target,
             WorkerAction.Grow,
-            plan.growThreads,
-            delays.grow,
+            plan.threads.grow,
+            plan.delays.grow,
         )) {
             return;
         }
@@ -200,8 +243,8 @@ export class Allocator
             plannedJobs,
             target,
             WorkerAction.Weaken,
-            plan.growWeakenThreads,
-            delays.growWeaken,
+            plan.threads.weakenAfterGrow,
+            plan.delays.weakenAfterGrow,
         )) {
             return;
         }
@@ -209,15 +252,20 @@ export class Allocator
         this.commitPlannedAllocation(workers, plannedWorkers, jobs, plannedJobs);
     }
 
-    private allocatePrepTarget(workers: WorkerAllocation[], jobs: WorkerJob[], target: TargetInfo, allowedRam: number): void
+    private allocatePrepTarget(
+        workers: WorkerAllocation[],
+        jobs: WorkerJob[],
+        pendingOperations: ScheduledBatchOperation[],
+        target: TargetInfo,
+        allowedRam: number
+    ): void
     {
-        const plan = this.createPrepPlan(target, allowedRam);
+        const plan = this.createPrepPlan(target, allowedRam, pendingOperations);
 
         if (null === plan) {
             return;
         }
 
-        const delays = this.createActionDelays(target);
         const plannedWorkers = this.cloneWorkerAllocations(workers);
         const plannedJobs: WorkerJob[] = [];
 
@@ -226,8 +274,8 @@ export class Allocator
             plannedJobs,
             target,
             WorkerAction.Grow,
-            plan.growThreads,
-            delays[WorkerAction.Grow] ?? 0,
+            plan.threads.grow,
+            plan.delays.grow,
         )) {
             return;
         }
@@ -237,8 +285,8 @@ export class Allocator
             plannedJobs,
             target,
             WorkerAction.Weaken,
-            plan.weakenThreads,
-            delays[WorkerAction.Weaken] ?? 0,
+            plan.threads.weaken,
+            plan.delays.weaken,
         )) {
             return;
         }
@@ -287,23 +335,6 @@ export class Allocator
 
             this.addShareJob(jobs, worker, threads);
         }
-    }
-
-    private createFarmDelays(target: TargetInfo): FarmDelays
-    {
-        const ns = this.context.ns;
-        const player = this.context.getPlayer();
-        const server = this.context.toFormulaServer(target);
-        const hackTime = ns.formulas.hacking.hackTime(server, player);
-        const growTime = ns.formulas.hacking.growTime(server, player);
-        const weakenTime = ns.formulas.hacking.weakenTime(server, player);
-
-        return {
-            hack: Math.max(0, weakenTime - hackTime - BATCH_SPACING_MS),
-            hackWeaken: 0,
-            grow: Math.max(0, weakenTime - growTime + BATCH_SPACING_MS),
-            growWeaken: BATCH_SPACING_MS * 2,
-        };
     }
 
     private cloneWorkerAllocations(workers: WorkerAllocation[]): WorkerAllocation[]
@@ -397,7 +428,7 @@ export class Allocator
         worker.freeRam = Math.max(0, worker.freeRam - allocatedRam);
     }
 
-    private getAvailableWorkers(workers: WorkerAllocation[], action: WorkerAction): WorkerAllocation[] 
+    private getAvailableWorkers(workers: WorkerAllocation[], action: WorkerAction): WorkerAllocation[]
     {
         return workers
             .filter(worker => worker.availableRam >= SCRIPT_RAM[action])
@@ -421,126 +452,366 @@ export class Allocator
             );
     }
 
-    private createActionDelays(target: TargetInfo): Partial<Record<WorkerAction, number>>
+    private createFarmPlan(
+        target: TargetInfo,
+        allowedRam: number,
+        pendingOperations: ScheduledBatchOperation[],
+    ): FarmPlan | null
     {
-        const ns = this.context.ns;
-        const player = this.context.getPlayer();
-        const server = this.context.toFormulaServer(target);
-        const hackTime = ns.formulas.hacking.hackTime(server, player);
-        const growTime = ns.formulas.hacking.growTime(server, player);
-        const weakenTime = ns.formulas.hacking.weakenTime(server, player);
+        const serverAfterPendingOperations = this.targetSimulator.simulateAfterPendingOperations(
+            target,
+            pendingOperations,
+        );
+        const delays = this.createFarmDelays(target, pendingOperations);
+        const maximumHackThreads = Math.min(
+            this.calculateHackThreadsForServer(serverAfterPendingOperations),
+            Math.floor(allowedRam / SCRIPT_RAM[WorkerAction.Hack]),
+        );
 
-        return {
-            [WorkerAction.Hack]: Math.max(0, weakenTime - hackTime - (BATCH_SPACING_MS * 2)),
-            [WorkerAction.Grow]: Math.max(0, weakenTime - growTime - BATCH_SPACING_MS),
-            [WorkerAction.Weaken]: 0,
-        };
-    }
+        let minimumCandidateHackThreads = 1;
+        let maximumCandidateHackThreads = maximumHackThreads;
+        let bestPlan: FarmPlan | null = null;
 
-    private createPrepPlan(target: TargetInfo, allowedRam: number): PrepPlan | null
-    {
-        const maxGrowThreads = Math.min(this.calculateGrowThreads(target), Math.floor(allowedRam / SCRIPT_RAM[WorkerAction.Grow]));
+        while (minimumCandidateHackThreads <= maximumCandidateHackThreads) {
+            const candidateHackThreads = Math.floor(
+                minimumCandidateHackThreads
+                + ((maximumCandidateHackThreads - minimumCandidateHackThreads) / 2),
+            );
 
-        let min = 1;
-        let max = maxGrowThreads;
-        let bestPlan: PrepPlan | null = null;
+            const threads = this.calculateFarmThreads(
+                serverAfterPendingOperations,
+                candidateHackThreads,
+            );
 
-        while (min <= max) {
-            const growThreads = Math.floor(min + ((max - min) / 2));
-            const plan = this.calculatePrepPlan(target, growThreads);
+            const candidatePlan: FarmPlan = {
+                threads,
+                delays,
+                totalRam: this.calculateFarmPlanRam(threads),
+            };
 
-            if (plan.totalRam <= allowedRam) {
-                bestPlan = plan;
-                min = growThreads + 1;
+            if (candidatePlan.totalRam <= allowedRam) {
+                bestPlan = candidatePlan;
+                minimumCandidateHackThreads = candidateHackThreads + 1;
                 continue;
             }
 
-            max = growThreads - 1;
+            maximumCandidateHackThreads = candidateHackThreads - 1;
         }
 
         return bestPlan;
     }
 
-    private calculatePrepPlan(target: TargetInfo, growThreads: number): PrepPlan
+    private calculateFarmThreads(serverAfterPendingOperations: Server, hackThreads: number): FarmThreads
     {
+        const ns = this.context.ns;
+        const player = this.context.getPlayer();
+        const server = { ...serverAfterPendingOperations };
+
+        const minimumSecurity = server.minDifficulty ?? 1;
+        const currentSecurity = server.hackDifficulty ?? minimumSecurity;
+
+        const currentMoney = Math.max(1, server.moneyAvailable ?? 0);
+        const maximumMoney = server.moneyMax ?? currentMoney;
+
+        const hackRatio = Math.min(TARGET_HACK_RATIO, ns.formulas.hacking.hackPercent(server, player) * hackThreads);
+
+        server.moneyAvailable = Math.max(1, currentMoney * (1 - hackRatio));
+        server.hackDifficulty = Math.min(100, currentSecurity + calculateHackSecurityIncrease(hackThreads));
+
+        const securityToWeakenAfterHack = Math.max(0, server.hackDifficulty - minimumSecurity);
+        const weakenEffect = ns.formulas.hacking.weakenEffect(1);
+        const weakenAfterHackThreads = weakenEffect <= 0 ? 0 : Math.ceil(securityToWeakenAfterHack / weakenEffect);
+
+        server.hackDifficulty = Math.max(minimumSecurity, server.hackDifficulty - (weakenAfterHackThreads * weakenEffect));
+
+        const growThreads = Math.max(1, Math.ceil(ns.formulas.hacking.growThreads(server, player, maximumMoney)));
+        const securityToWeakenAfterGrow = calculateGrowSecurityIncrease(growThreads);
+        const weakenAfterGrowThreads = weakenEffect <= 0 ? 0 : Math.ceil(securityToWeakenAfterGrow / weakenEffect);
+
+        return {
+            hack: hackThreads,
+            weakenAfterHack: weakenAfterHackThreads,
+            grow: growThreads,
+            weakenAfterGrow: weakenAfterGrowThreads,
+        };
+    }
+
+    private calculateFarmPlanRam(threads: FarmThreads): number
+    {
+        return (threads.hack * SCRIPT_RAM[WorkerAction.Hack])
+            + (threads.weakenAfterHack * SCRIPT_RAM[WorkerAction.Weaken])
+            + (threads.grow * SCRIPT_RAM[WorkerAction.Grow])
+            + (threads.weakenAfterGrow * SCRIPT_RAM[WorkerAction.Weaken]);
+    }
+
+    private createFarmDelays(target: TargetInfo, pendingOperations: ScheduledBatchOperation[]): FarmDelays
+    {
+        const planningStartedAt = Date.now();
+        const lastPendingLandingAt = pendingOperations
+            .filter(operation => operation.target === target.hostname)
+            .reduce(
+                (latestLandingAt, operation) => Math.max(latestLandingAt, operation.landingAt),
+                planningStartedAt,
+            );
+
+        let hackLandingAt = lastPendingLandingAt + BATCH_SPACING_MS;
+        let weakenAfterHackLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 2);
+        let growLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 3);
+        let weakenAfterGrowLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 4);
+
+        let hackStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Hack,
+            hackLandingAt,
+            planningStartedAt,
+        );
+
+        let weakenAfterHackStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Weaken,
+            weakenAfterHackLandingAt,
+            planningStartedAt,
+        );
+
+        let growStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Grow,
+            growLandingAt,
+            planningStartedAt,
+        );
+
+        let weakenAfterGrowStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Weaken,
+            weakenAfterGrowLandingAt,
+            planningStartedAt,
+        );
+
+        const earliestStartAt = Math.min(
+            hackStartsAt,
+            weakenAfterHackStartsAt,
+            growStartsAt,
+            weakenAfterGrowStartsAt,
+        );
+
+        const requiredTimelineShift = Math.max(0, planningStartedAt - earliestStartAt);
+
+        hackLandingAt += requiredTimelineShift;
+        weakenAfterHackLandingAt += requiredTimelineShift;
+        growLandingAt += requiredTimelineShift;
+        weakenAfterGrowLandingAt += requiredTimelineShift;
+
+        hackStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Hack,
+            hackLandingAt,
+            planningStartedAt,
+        );
+
+        weakenAfterHackStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Weaken,
+            weakenAfterHackLandingAt,
+            planningStartedAt,
+        );
+
+        growStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Grow,
+            growLandingAt,
+            planningStartedAt,
+        );
+
+        weakenAfterGrowStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Weaken,
+            weakenAfterGrowLandingAt,
+            planningStartedAt,
+        );
+
+        const delayReferenceAt = Date.now();
+
+        return {
+            hack: Math.max(0, hackStartsAt - delayReferenceAt),
+            weakenAfterHack: Math.max(0, weakenAfterHackStartsAt - delayReferenceAt),
+            grow: Math.max(0, growStartsAt - delayReferenceAt),
+            weakenAfterGrow: Math.max(0, weakenAfterGrowStartsAt - delayReferenceAt),
+        };
+    }
+
+    private calculateActionStartAt(
+        target: TargetInfo,
+        pendingOperations: ScheduledBatchOperation[],
+        action: WorkerAction,
+        landingAt: number,
+        earliestStartAt: number,
+    ): number
+    {
+        let startsAt = landingAt - this.targetSimulator.calculateActionTimeAt(
+            target,
+            pendingOperations,
+            action,
+            earliestStartAt,
+        );
+
+        for (let attempt = 0; attempt < MAX_TIMELINE_CALCULATION_ATTEMPTS; attempt++) {
+            const simulationAt = Math.max(earliestStartAt, startsAt);
+            const actionTime = this.targetSimulator.calculateActionTimeAt(
+                target,
+                pendingOperations,
+                action,
+                simulationAt,
+            );
+            const calculatedStartsAt = landingAt - actionTime;
+
+            if (Math.abs(calculatedStartsAt - startsAt) <= TIMELINE_TOLERANCE_MS) {
+                return calculatedStartsAt;
+            }
+
+            startsAt = calculatedStartsAt;
+        }
+
+        return startsAt;
+    }
+
+    private createPrepPlan(
+        target: TargetInfo,
+        allowedRam: number,
+        pendingOperations: ScheduledBatchOperation[],
+    ): PrepPlan | null
+    {
+        const serverAfterPendingOperations = this.targetSimulator.simulateAfterPendingOperations(
+            target,
+            pendingOperations,
+        );
+        const delays = this.createPrepDelays(target, pendingOperations);
+        const maximumGrowThreads = Math.min(
+            this.calculateGrowThreadsForServer(serverAfterPendingOperations),
+            Math.floor(allowedRam / SCRIPT_RAM[WorkerAction.Grow]),
+        );
+
+        let minimumCandidateGrowThreads = 1;
+        let maximumCandidateGrowThreads = maximumGrowThreads;
+        let bestPlan: PrepPlan | null = null;
+
+        while (minimumCandidateGrowThreads <= maximumCandidateGrowThreads) {
+            const candidateGrowThreads = Math.floor(
+                minimumCandidateGrowThreads
+                + ((maximumCandidateGrowThreads - minimumCandidateGrowThreads) / 2),
+            );
+
+            const threads = this.calculatePrepThreads(
+                serverAfterPendingOperations,
+                candidateGrowThreads,
+            );
+
+            const candidatePlan: PrepPlan = {
+                threads,
+                delays,
+                totalRam: this.calculatePrepPlanRam(threads),
+            };
+
+            if (candidatePlan.totalRam <= allowedRam) {
+                bestPlan = candidatePlan;
+                minimumCandidateGrowThreads = candidateGrowThreads + 1;
+                continue;
+            }
+
+            maximumCandidateGrowThreads = candidateGrowThreads - 1;
+        }
+
+        return bestPlan;
+    }
+
+    private calculatePrepThreads(serverAfterPendingOperations: Server, growThreads: number): PrepThreads
+    {
+        const minimumSecurity = serverAfterPendingOperations.minDifficulty ?? 1;
+        const currentSecurity = serverAfterPendingOperations.hackDifficulty ?? minimumSecurity;
+        const securityIncrease = Math.max(0, currentSecurity - minimumSecurity)
+            + calculateGrowSecurityIncrease(growThreads);
         const weakenEffect = this.context.ns.formulas.hacking.weakenEffect(1);
-        const securityIncrease = calculateSecurityDelta(target) + this.calculateGrowSecurityIncrease(growThreads);
         const weakenThreads = weakenEffect <= 0 ? 0 : Math.ceil(securityIncrease / weakenEffect);
 
         return {
-            growThreads,
-            weakenThreads,
-            totalRam: this.calculatePrepPlanRam(growThreads, weakenThreads),
+            grow: growThreads,
+            weaken: weakenThreads,
         };
     }
 
-    private calculatePrepPlanRam(growThreads: number, weakenThreads: number): number
+    private calculatePrepPlanRam(threads: PrepThreads): number
     {
-        return (growThreads * SCRIPT_RAM[WorkerAction.Grow]) + (weakenThreads * SCRIPT_RAM[WorkerAction.Weaken]);
+        return (threads.grow * SCRIPT_RAM[WorkerAction.Grow])
+            + (threads.weaken * SCRIPT_RAM[WorkerAction.Weaken]);
     }
 
-    private createFarmPlan(target: TargetInfo, allowedRam: number): FarmPlan | null
+    private createPrepDelays(target: TargetInfo, pendingOperations: ScheduledBatchOperation[]): PrepDelays
     {
-        const maxHackThreads = Math.min(this.calculateHackThreads(target), Math.floor(allowedRam / SCRIPT_RAM[WorkerAction.Hack]));
+        const planningStartedAt = Date.now();
+        const lastPendingLandingAt = pendingOperations
+            .filter(operation => operation.target === target.hostname)
+            .reduce(
+                (latestLandingAt, operation) => Math.max(latestLandingAt, operation.landingAt),
+                planningStartedAt,
+            );
 
-        let min = 1;
-        let max = maxHackThreads;
-        let bestPlan: FarmPlan | null = null;
+        let growLandingAt = lastPendingLandingAt + BATCH_SPACING_MS;
+        let weakenLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 2);
 
-        while (min <= max) {
-            const hackThreads = Math.floor(min + ((max - min) / 2));
-            const plan = this.calculateFarmPlan(target, hackThreads);
+        let growStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Grow,
+            growLandingAt,
+            planningStartedAt,
+        );
 
-            if (plan.totalRam <= allowedRam) {
-                bestPlan = plan;
-                min = hackThreads + 1;
-                continue;
-            }
+        let weakenStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Weaken,
+            weakenLandingAt,
+            planningStartedAt,
+        );
 
-            max = hackThreads - 1;
-        }
+        const earliestStartAt = Math.min(growStartsAt, weakenStartsAt);
+        const requiredTimelineShift = Math.max(0, planningStartedAt - earliestStartAt);
 
-        return bestPlan;
-    }
+        growLandingAt += requiredTimelineShift;
+        weakenLandingAt += requiredTimelineShift;
 
-    private calculateFarmPlan(target: TargetInfo, hackThreads: number): FarmPlan
-    {
-        const ns = this.context.ns;
-        const player = this.context.getPlayer();
-        const server = this.context.toFormulaServer(target);
-        const hackRatio = Math.min(TARGET_HACK_RATIO, ns.formulas.hacking.hackPercent(server, player) * hackThreads);
+        growStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Grow,
+            growLandingAt,
+            planningStartedAt,
+        );
 
-        server.moneyAvailable = Math.max(1, target.currentMoney * (1 - hackRatio));
-        server.hackDifficulty! += this.calculateHackSecurityIncrease(hackThreads);
+        weakenStartsAt = this.calculateActionStartAt(
+            target,
+            pendingOperations,
+            WorkerAction.Weaken,
+            weakenLandingAt,
+            planningStartedAt,
+        );
 
-        const growThreads = Math.max(1, Math.ceil(ns.formulas.hacking.growThreads(server, player, target.maxMoney)));
-
-        const hackSecurityIncrease = calculateSecurityDelta(target)
-            + this.calculateHackSecurityIncrease(hackThreads);
-
-        const growSecurityIncrease = this.calculateGrowSecurityIncrease(growThreads);
-
-        const weakenEffect = ns.formulas.hacking.weakenEffect(1);
-        const hackWeakenThreads = weakenEffect <= 0 ? 0 : Math.ceil(hackSecurityIncrease / weakenEffect);
-        const growWeakenThreads = weakenEffect <= 0 ? 0 : Math.ceil(growSecurityIncrease / weakenEffect);
+        const delayReferenceAt = Date.now();
 
         return {
-            hackThreads,
-            growThreads,
-            hackWeakenThreads,
-            growWeakenThreads,
-            totalRam: this.calculateFarmPlanRam(hackThreads, growThreads, hackWeakenThreads, growWeakenThreads),
+            grow: Math.max(0, growStartsAt - delayReferenceAt),
+            weaken: Math.max(0, weakenStartsAt - delayReferenceAt),
         };
     }
 
-    private calculateFarmPlanRam(hackThreads: number, growThreads: number, hackWeakenThreads: number, growWeakenThreads: number): number
-    {
-        return (hackThreads * SCRIPT_RAM[WorkerAction.Hack]) 
-            + (growThreads * SCRIPT_RAM[WorkerAction.Grow])
-            + ((hackWeakenThreads + growWeakenThreads) * SCRIPT_RAM[WorkerAction.Weaken]);
-    }
-
-    private calculateThreads(allowedRam: number, target: TargetInfo, action: WorkerAction): number 
+    private calculateThreads(allowedRam: number, target: TargetInfo, action: WorkerAction): number
     {
         const remainingThreads = Math.floor(Math.max(0, allowedRam) / SCRIPT_RAM[action]);
 
@@ -555,15 +826,24 @@ export class Allocator
         if (WorkerAction.Grow === action) {
             return Math.min(remainingThreads, this.calculateGrowThreads(target));
         }
-        
+
         return remainingThreads;
     }
 
-    private calculateHackThreads(target: TargetInfo): number 
+    private calculateHackThreads(target: TargetInfo): number
+    {
+        return this.calculateHackThreadsForServer(
+            this.context.toFormulaServer(target),
+        );
+    }
+
+    private calculateHackThreadsForServer(server: Server): number
     {
         const player = this.context.getPlayer();
-        const server = this.context.toFormulaServer(target);
-        const hackRatioPerThread = this.context.ns.formulas.hacking.hackPercent(server, player);
+        const hackRatioPerThread = this.context.ns.formulas.hacking.hackPercent(
+            server,
+            player,
+        );
 
         if (hackRatioPerThread <= 0) {
             return 0;
@@ -575,7 +855,33 @@ export class Allocator
         );
     }
 
-    private calculateWeakenThreads(target: TargetInfo): number 
+    private calculateGrowThreads(target: TargetInfo): number
+    {
+        return this.calculateGrowThreadsForServer(
+            this.context.toFormulaServer(target),
+        );
+    }
+
+    private calculateGrowThreadsForServer(server: Server): number
+    {
+        const currentMoney = server.moneyAvailable ?? 0;
+        const maximumMoney = server.moneyMax ?? 0;
+
+        if (currentMoney >= maximumMoney) {
+            return 0;
+        }
+
+        return Math.max(
+            1,
+            Math.ceil(this.context.ns.formulas.hacking.growThreads(
+                server,
+                this.context.getPlayer(),
+                maximumMoney,
+            )),
+        );
+    }
+
+    private calculateWeakenThreads(target: TargetInfo): number
     {
         const securityDelta = calculateSecurityDelta(target);
         const weakenEffect = this.context.ns.formulas.hacking.weakenEffect(1);
@@ -587,32 +893,10 @@ export class Allocator
         return Math.ceil(securityDelta / weakenEffect);
     }
 
-    private calculateGrowThreads(target: TargetInfo): number 
-    {
-        const player = this.context.getPlayer();
-        const server = this.context.toFormulaServer(target);
-
-        if (target.currentMoney >= target.maxMoney) {
-            return 0;
-        }
-
-        return Math.max(1, Math.ceil(this.context.ns.formulas.hacking.growThreads(server, player, target.maxMoney)));
-    }
-
     private calculateShareThreads(worker: WorkerAllocation): number
     {
         return Math.floor(
             Math.max(0, worker.availableRam - SHARE_RAM_BUFFER) / SCRIPT_RAM[WorkerAction.Share]
         );
-    }
-
-    private calculateHackSecurityIncrease(threads: number): number
-    {
-        return threads * HACK_SECURITY_INCREASE;
-    }
-
-    private calculateGrowSecurityIncrease(threads: number): number
-    {
-        return threads * GROW_SECURITY_INCREASE;
     }
 }
