@@ -16,6 +16,7 @@ import {
     WorkerAction,
     WORKER_COMPLETION_FAILURE_PORT,
     WORKER_COMPLETION_PORTS,
+    BATCH_SPACING_MS,
 } from "src/utils/constants";
 
 type ActiveBatch = {
@@ -108,11 +109,11 @@ export class BatchScheduler
         for (const [target, targetJobs] of jobsByTarget) {
             const targetInfo = targetsByHostname.get(target);
 
-            this.assertScheduledWorkerJobs(targetJobs);
-
             if (undefined === targetInfo) {
                 continue;
             }
+
+            this.assertScheduledWorkerJobs(targetJobs);
 
             const targetBatches = this.activeBatches.get(target) ?? [];
 
@@ -184,6 +185,12 @@ export class BatchScheduler
             };
 
             if (undefined !== operation) {
+                if (operation.action !== job.action) {
+                    throw new Error(
+                        `Operation ${job.operationIndex} of batch ${batchId} contains different actions.`,
+                    );
+                }
+
                 operation.threads += job.threads;
                 operation.fragments.push(fragment);
 
@@ -198,20 +205,89 @@ export class BatchScheduler
                 action: job.action,
                 threads: job.threads,
                 startsAt,
-                additionalMsec: job.additionalMsec,
+                additionalMsec: 0,
                 landingAt: startsAt + this.targetSimulator.calculateActionTimeAt(
                     targetInfo,
                     pendingOperations,
                     job.action,
                     startsAt,
-                ) + job.additionalMsec,
+                ),
                 operationIndex: job.operationIndex,
                 fragments: [fragment],
             });
         }
 
-        return [...operationsByIndex.values()]
+        const operations = [...operationsByIndex.values()];
+
+        this.scheduleOperations(target, operations, jobs, pendingOperations, registeredAt);
+
+        return operations
             .sort((left, right) => left.landingAt - right.landingAt);
+    }
+
+    private scheduleOperations(
+        target: string,
+        operations: ScheduledBatchOperation[],
+        jobs: ScheduledWorkerJob[],
+        pendingOperations: ScheduledBatchOperation[],
+        registeredAt: number,
+    ): void
+    {
+        const lastPendingLandingAt = this.getLastPendingLandingAt(
+            target,
+            pendingOperations,
+            registeredAt,
+        );
+
+        for (const operation of operations) {
+            const actionTime = operation.landingAt - operation.startsAt;
+            const plannedLandingAt = lastPendingLandingAt
+                + (BATCH_SPACING_MS * (operation.operationIndex + 1));
+
+            operation.additionalMsec = plannedLandingAt - operation.startsAt - actionTime;
+            operation.landingAt = plannedLandingAt;
+        }
+
+        const minimumAdditionalMsec = Math.min(
+            ...operations.map(operation => operation.additionalMsec),
+        );
+        const requiredTimelineShift = Math.max(0, -minimumAdditionalMsec);
+
+        for (const operation of operations) {
+            operation.additionalMsec += requiredTimelineShift;
+            operation.landingAt += requiredTimelineShift;
+        }
+
+        const additionalMsecByOperationIndex = new Map<number, number>(
+            operations.map<[number, number]>(operation => [
+                operation.operationIndex,
+                operation.additionalMsec,
+            ]),
+        );
+
+        for (const job of jobs) {
+            const additionalMsec = additionalMsecByOperationIndex.get(job.operationIndex);
+
+            if (undefined === additionalMsec) {
+                throw new Error(`Missing timing for operation ${job.operationIndex}.`);
+            }
+
+            job.additionalMsec = additionalMsec;
+        }
+    }
+
+    private getLastPendingLandingAt(
+        target: string,
+        pendingOperations: ScheduledBatchOperation[],
+        registeredAt: number,
+    ): number
+    {
+        return pendingOperations
+            .filter(operation => operation.target === target)
+            .reduce(
+                (latestLandingAt, operation) => Math.max(latestLandingAt, operation.landingAt),
+                registeredAt,
+            );
     }
 
     private assertScheduledWorkerJobs(jobs: WorkerJob[]): asserts jobs is ScheduledWorkerJob[]
