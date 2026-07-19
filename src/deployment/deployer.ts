@@ -1,7 +1,12 @@
 import { Context } from 'src/models/context';
 import { ServerInfo } from "src/models/server-info";
 import { WorkerJob } from "src/models/worker-job";
-import { SCRIPT_MAP, WorkerAction } from 'src/utils/constants';
+import {
+    SCRIPT_MAP,
+    WorkerAction,
+    WORKER_COMPLETION_FAILURE_PORT,
+    WORKER_COMPLETION_PORTS,
+} from 'src/utils/constants';
 import { isWorkerServer } from 'src/deployment/worker-helper';
 
 type BatchWorkerJob = WorkerJob & {
@@ -11,6 +16,7 @@ type BatchWorkerJob = WorkerJob & {
 export class Deployer
 {
     private readonly workerScripts: Set<string>;
+    private nextTelemetryPortIndex = 0;
 
     constructor(private readonly context: Context)
     {
@@ -107,7 +113,13 @@ export class Deployer
 
         if (WorkerAction.Share !== job.action) {
             if (this.hasBatchId(job)) {
-                scriptArguments.push(job.batchId);
+                scriptArguments.push(
+                    job.batchId,
+                    job.hostname,
+                    job.threads,
+                    this.getNextTelemetryPort(),
+                    WORKER_COMPLETION_FAILURE_PORT,
+                );
             } else {
                 return;
             }
@@ -125,6 +137,15 @@ export class Deployer
         }
 
         this.reportDeployFailure(job, script);
+    }
+
+    private getNextTelemetryPort(): number
+    {
+        const telemetryPort = WORKER_COMPLETION_PORTS[this.nextTelemetryPortIndex];
+
+        this.nextTelemetryPortIndex = (this.nextTelemetryPortIndex + 1) % WORKER_COMPLETION_PORTS.length;
+
+        return telemetryPort;
     }
 
     private getWorkers(servers: ServerInfo[]): ServerInfo[]

@@ -28,6 +28,7 @@ export async function main(ns: NS)
 
     while (true) {
         context.beginTick();
+        batchScheduler.collectLandingTelemetry();
 
         // Scan & Rooting
         const servers = scanner.scan();
@@ -76,7 +77,12 @@ export async function main(ns: NS)
         // Debugging
         ns.clearLog();
         ns.ui.setTailTitle(`Reports - ${new Date().toLocaleString("de-DE")}`);
-        debugReporter.report(servers, targets, protectedJobs);
+        debugReporter.report(
+            servers,
+            targets,
+            protectedJobs,
+            batchScheduler.getLandingTelemetrySnapshot(),
+        );
 
         snapshotWriter.write(snapshot);
 

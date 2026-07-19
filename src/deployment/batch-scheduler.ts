@@ -2,9 +2,21 @@ import { Context } from "src/models/context";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
 import { ScheduledBatchOperation } from "src/models/scheduled-batch-operation";
-import { WorkerAction, MAX_ACTIVE_BATCHES_PER_TARGET, TargetState } from "src/utils/constants";
+import {
+    LANDING_TELEMETRY_WINDOW_MS,
+    LANDING_TELEMETRY_GRACE_MS,
+    MAX_ACTIVE_BATCHES_PER_TARGET,
+    TargetState,
+    WorkerAction,
+    WORKER_COMPLETION_FAILURE_PORT,
+    WORKER_COMPLETION_PORTS,
+} from "src/utils/constants";
 import { ScheduledOperationFragment } from "src/models/scheduled-operation-fragment";
 import { TargetSimulator } from "src/deployment/target-simulator";
+import { WorkerCompletionEvent } from "src/models/worker-completion-event";
+import { LandingTelemetrySample } from "src/models/landing-telemetry-sample";
+import { LandingTelemetryOperation } from "src/models/landing-telemetry-operation";
+import { LandingTelemetrySnapshot } from "src/models/landing-telemetry-snapshot";
 
 type ActiveBatch = {
     batchId: string;
@@ -18,6 +30,10 @@ export class BatchScheduler
 {
     private readonly targetSimulator: TargetSimulator;
     private readonly activeBatches = new Map<string, ActiveBatch[]>();
+    private recentScheduledOperations: ScheduledBatchOperation[] = [];
+    private landingTelemetrySamples: LandingTelemetrySample[] = [];
+    private unmatchedTelemetryEvents: number[] = [];
+    private portWriteFailures: number[] = [];
     private nextBatchSequence = 1;
 
     constructor(private readonly context: Context) {
@@ -31,6 +47,49 @@ export class BatchScheduler
         return targets.filter(target =>
             (this.activeBatches.get(target.hostname)?.length ?? 0) < this.getMaxActiveBatches(target)
         );
+    }
+
+    public collectLandingTelemetry(): void
+    {
+        for (const port of WORKER_COMPLETION_PORTS) {
+            this.collectLandingTelemetryFromPort(port);
+        }
+
+        this.collectPortWriteFailures();
+
+        this.removeExpiredTelemetryData();
+    }
+
+    public getLandingTelemetrySnapshot(): LandingTelemetrySnapshot
+    {
+        this.removeExpiredTelemetryData();
+
+        const now = Date.now();
+        const oldestExpectedLandingAt = now - LANDING_TELEMETRY_WINDOW_MS;
+        const latestExpectedLandingAt = now - LANDING_TELEMETRY_GRACE_MS;
+        const operations = this.getRecentScheduledOperations()
+            .filter(operation =>
+                operation.landingAt >= oldestExpectedLandingAt
+                && operation.landingAt <= latestExpectedLandingAt
+            )
+            .map<LandingTelemetryOperation>(operation => ({
+                batchId: operation.batchId,
+                target: operation.target,
+                action: operation.action,
+                additionalMsec: operation.additionalMsec,
+                expectedLandingAt: operation.landingAt,
+                expectedFragments: operation.fragments.length,
+            }));
+        const operationKeys = new Set(operations.map(operation => this.createOperationKey(operation)));
+
+        return {
+            operations,
+            samples: this.landingTelemetrySamples.filter(sample =>
+                operationKeys.has(this.createOperationKey(sample))
+            ),
+            unmatchedEvents: this.unmatchedTelemetryEvents.length,
+            portWriteFailures: this.portWriteFailures.length,
+        };
     }
 
     public register(jobs: WorkerJob[], targets: TargetInfo[], pendingOperations: ScheduledBatchOperation[]): void
@@ -182,6 +241,163 @@ export class BatchScheduler
         );
     }
 
+    private collectLandingTelemetryFromPort(port: number): void
+    {
+        const ns = this.context.ns;
+
+        while (true) {
+            const portData: unknown = ns.readPort(port);
+
+            if ("NULL PORT DATA" === portData) {
+                return;
+            }
+
+            if (false === this.isWorkerCompletionEvent(portData)) {
+                continue;
+            }
+
+            const operation = this.findScheduledOperation(portData);
+
+            if (undefined === operation) {
+                this.unmatchedTelemetryEvents.push(portData.landedAt);
+                continue;
+            }
+
+            const fragmentWasScheduled = operation.fragments.some(fragment =>
+                fragment.hostname === portData.hostname
+                && fragment.threads === portData.threads
+            );
+
+            if (false === fragmentWasScheduled) {
+                this.unmatchedTelemetryEvents.push(portData.landedAt);
+                continue;
+            }
+
+            const fragmentWasAlreadyReported = this.landingTelemetrySamples.some(sample =>
+                sample.batchId === portData.batchId
+                && sample.action === portData.action
+                && sample.additionalMsec === portData.additionalMsec
+                && sample.hostname === portData.hostname
+                && sample.threads === portData.threads
+            );
+
+            if (fragmentWasAlreadyReported) {
+                this.unmatchedTelemetryEvents.push(portData.landedAt);
+                continue;
+            }
+
+            this.landingTelemetrySamples.push({
+                ...portData,
+                expectedLandingAt: operation.landingAt,
+                driftMs: portData.landedAt - operation.landingAt,
+            });
+        }
+    }
+
+    private collectPortWriteFailures(): void
+    {
+        const ns = this.context.ns;
+
+        while (true) {
+            const portData: unknown = ns.readPort(WORKER_COMPLETION_FAILURE_PORT);
+
+            if ("NULL PORT DATA" === portData) {
+                return;
+            }
+
+            if ("number" === typeof portData && Number.isFinite(portData)) {
+                this.portWriteFailures.push(portData);
+            }
+        }
+    }
+
+    private getRecentScheduledOperations(): ScheduledBatchOperation[]
+    {
+        return [
+            ...[...this.activeBatches.values()]
+                .flatMap(batches => batches)
+                .flatMap(batch => batch.operations),
+            ...this.recentScheduledOperations,
+        ];
+    }
+
+    private createOperationKey(operation: {
+        batchId: string;
+        action: WorkerAction;
+        additionalMsec: number;
+    }): string
+    {
+        return `${operation.batchId}|${operation.action}|${operation.additionalMsec}`;
+    }
+
+    private findScheduledOperation(event: WorkerCompletionEvent): ScheduledBatchOperation | undefined
+    {
+        const activeOperation = [...this.activeBatches.values()]
+            .flatMap(batches => batches)
+            .find(batch => batch.batchId === event.batchId)
+            ?.operations.find(operation =>
+                operation.target === event.target
+                && operation.action === event.action
+                && operation.additionalMsec === event.additionalMsec
+            );
+
+        if (undefined !== activeOperation) {
+            return activeOperation;
+        }
+
+        return this.recentScheduledOperations.find(operation =>
+            operation.batchId === event.batchId
+            && operation.target === event.target
+            && operation.action === event.action
+            && operation.additionalMsec === event.additionalMsec
+        );
+    }
+
+    private isWorkerCompletionEvent(value: unknown): value is WorkerCompletionEvent
+    {
+        if ("object" !== typeof value || null === value) {
+            return false;
+        }
+
+        const event = value as Partial<WorkerCompletionEvent>;
+
+        return "string" === typeof event.batchId
+            && "string" === typeof event.target
+            && this.isBatchWorkerAction(event.action)
+            && "string" === typeof event.hostname
+            && "number" === typeof event.threads
+            && Number.isFinite(event.threads)
+            && "number" === typeof event.additionalMsec
+            && Number.isFinite(event.additionalMsec)
+            && "number" === typeof event.landedAt
+            && Number.isFinite(event.landedAt);
+    }
+
+    private isBatchWorkerAction(action: unknown): action is WorkerAction
+    {
+        return WorkerAction.Hack === action
+            || WorkerAction.Grow === action
+            || WorkerAction.Weaken === action;
+    }
+
+    private removeExpiredTelemetryData(): void
+    {
+        const oldestTelemetryAt = Date.now() - LANDING_TELEMETRY_WINDOW_MS;
+
+        this.landingTelemetrySamples = this.landingTelemetrySamples.filter(sample =>
+            sample.expectedLandingAt >= oldestTelemetryAt
+        );
+        this.recentScheduledOperations = this.recentScheduledOperations.filter(operation =>
+            operation.landingAt >= oldestTelemetryAt
+        );
+        this.unmatchedTelemetryEvents = this.unmatchedTelemetryEvents.filter(landedAt =>
+            landedAt >= oldestTelemetryAt
+        );
+        this.portWriteFailures = this.portWriteFailures.filter(failedAt =>
+            failedAt >= oldestTelemetryAt
+        );
+    }
+
     private getMaxActiveBatches(target: TargetInfo): number
     {
         return TargetState.Farm === target.state ? MAX_ACTIVE_BATCHES_PER_TARGET : 1;
@@ -199,7 +415,12 @@ export class BatchScheduler
         const now = Date.now();
 
         for (const [target, batches] of this.activeBatches) {
-            const ongoingBatches = batches.filter(batch => batch.finishAt > now );
+            const ongoingBatches = batches.filter(batch => batch.finishAt > now);
+            const finishedOperations = batches
+                .filter(batch => batch.finishAt <= now)
+                .flatMap(batch => batch.operations);
+
+            this.recentScheduledOperations.push(...finishedOperations);
 
             if (ongoingBatches.length <= 0) {
                 this.activeBatches.delete(target);
@@ -208,5 +429,7 @@ export class BatchScheduler
 
             this.activeBatches.set(target, ongoingBatches);
         }
+
+        this.removeExpiredTelemetryData();
     }
 }

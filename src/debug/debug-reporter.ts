@@ -7,17 +7,149 @@ import { ServerInfo } from "src/models/server-info";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
 import { SCRIPT_MAP, TargetState, WorkerAction } from "src/utils/constants";
+import { LandingTelemetrySample } from "src/models/landing-telemetry-sample";
+import { LandingTelemetryRow } from "src/debug/reports/landing-telemetry-row";
+import { LandingTelemetrySnapshot } from "src/models/landing-telemetry-snapshot";
 
 export class DebugReporter
 {
     constructor(private readonly context: Context) {}
 
-    public report(servers: ServerInfo[], targets: TargetInfo[], jobs: WorkerJob[]): void
+    public report(
+        servers: ServerInfo[],
+        targets: TargetInfo[],
+        jobs: WorkerJob[],
+        landingTelemetry: LandingTelemetrySnapshot,
+    ): void
     {
         this.reportTargets(targets, jobs);
         this.reportAllocation(jobs);
+        this.reportLandingTelemetry(landingTelemetry);
         this.reportWorkers(servers);
         //this.reportStaleWorkers(servers, jobs);
+    }
+
+    private reportLandingTelemetry(telemetry: LandingTelemetrySnapshot): void
+    {
+        if (telemetry.operations.length <= 0 && telemetry.samples.length <= 0) {
+            return;
+        }
+
+        this.printLandingTelemetry(
+            this.buildLandingTelemetryReport(telemetry),
+            telemetry.unmatchedEvents,
+            telemetry.portWriteFailures,
+        );
+    }
+
+    private buildLandingTelemetryReport(telemetry: LandingTelemetrySnapshot): LandingTelemetryRow[]
+    {
+        const samples = telemetry.samples;
+        const samplesByAction = new Map<WorkerAction, LandingTelemetrySample[]>();
+
+        for (const sample of samples) {
+            samplesByAction.set(
+                sample.action,
+                [...(samplesByAction.get(sample.action) ?? []), sample],
+            );
+        }
+
+        const actions = new Set(telemetry.operations.map(operation => operation.action));
+
+        return [...actions].map(action => {
+            const actionOperations = telemetry.operations.filter(operation => operation.action === action);
+            const actionSamples = samplesByAction.get(action) ?? [];
+            const expectedFragments = actionOperations.reduce(
+                (sum, operation) => sum + operation.expectedFragments,
+                0,
+            );
+
+            return {
+                action,
+                operations: actionOperations.length,
+                expectedFragments,
+                reportedFragments: actionSamples.length,
+                missingFragments: Math.max(0, expectedFragments - actionSamples.length),
+                averageDriftMs: this.calculateAverageDrift(actionSamples),
+                minimumDriftMs: this.calculateMinimumDrift(actionSamples),
+                maximumDriftMs: this.calculateMaximumDrift(actionSamples),
+                maximumFragmentSpreadMs: this.calculateMaximumFragmentSpread(actionSamples),
+            };
+        });
+    }
+
+    private calculateAverageDrift(samples: LandingTelemetrySample[]): number
+    {
+        if (samples.length <= 0) {
+            return 0;
+        }
+
+        return samples.reduce((sum, sample) => sum + sample.driftMs, 0) / samples.length;
+    }
+
+    private calculateMinimumDrift(samples: LandingTelemetrySample[]): number
+    {
+        return samples.length <= 0 ? 0 : Math.min(...samples.map(sample => sample.driftMs));
+    }
+
+    private calculateMaximumDrift(samples: LandingTelemetrySample[]): number
+    {
+        return samples.length <= 0 ? 0 : Math.max(...samples.map(sample => sample.driftMs));
+    }
+
+    private calculateMaximumFragmentSpread(samples: LandingTelemetrySample[]): number
+    {
+        const landingTimesByOperation = new Map<string, number[]>();
+
+        for (const sample of samples) {
+            const operationKey = `${sample.batchId}|${sample.action}|${sample.additionalMsec}`;
+
+            landingTimesByOperation.set(
+                operationKey,
+                [...(landingTimesByOperation.get(operationKey) ?? []), sample.landedAt],
+            );
+        }
+
+        return [...landingTimesByOperation.values()].reduce((maximumSpread, landingTimes) => {
+            const spread = Math.max(...landingTimes) - Math.min(...landingTimes);
+
+            return Math.max(maximumSpread, spread);
+        }, 0);
+    }
+
+    private printLandingTelemetry(
+        rows: LandingTelemetryRow[],
+        unmatchedEvents: number,
+        portWriteFailures: number,
+    ): void
+    {
+        this.printSection("Landing Telemetry (60s)");
+
+        const table = new Table()
+            .column("Action")
+            .column("Operations", undefined, Alignment.Right)
+            .column("Fragments", undefined, Alignment.Right)
+            .column("Missing", undefined, Alignment.Right)
+            .column("Average drift", undefined, Alignment.Right)
+            .column("Minimum", undefined, Alignment.Right)
+            .column("Maximum", undefined, Alignment.Right)
+            .column("Max fragment spread", undefined, Alignment.Right);
+
+        for (const row of rows) {
+            table.row(
+                row.action,
+                row.operations.toString(),
+                `${row.reportedFragments} / ${row.expectedFragments}`,
+                row.missingFragments.toString(),
+                this.formatSignedMilliseconds(row.averageDriftMs),
+                this.formatSignedMilliseconds(row.minimumDriftMs),
+                this.formatSignedMilliseconds(row.maximumDriftMs),
+                this.formatMilliseconds(row.maximumFragmentSpreadMs),
+            );
+        }
+
+        this.printTable(table);
+        this.print(`Unmatched events: ${unmatchedEvents} | Port write failures: ${portWriteFailures}`);
     }
 
     private reportTargets(targets: TargetInfo[], jobs: WorkerJob[]): void
@@ -307,6 +439,21 @@ export class DebugReporter
         }
 
         return `${(value / 1000).toFixed(1)}s`;
+    }
+
+    private formatSignedMilliseconds(value: number): string
+    {
+        const roundedValue = Math.round(value);
+
+        if (roundedValue > 0) {
+            return `+${this.formatMilliseconds(roundedValue)}`;
+        }
+
+        if (roundedValue < 0) {
+            return `-${this.formatMilliseconds(Math.abs(roundedValue))}`;
+        }
+
+        return "0ms";
     }
 
     private getActionFromFilename(filename: string): string {

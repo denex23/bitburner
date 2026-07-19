@@ -32,6 +32,20 @@ export const TXT_WRITER = "src/data/dnet-txt-writer.ts";
 
 export const DASHBOARD_SNAPSHOT_FILE = "/tmp/dashboard-snapshot.txt";
 
+export const WORKER_COMPLETION_PORTS = [
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+];
+export const WORKER_COMPLETION_FAILURE_PORT = 109;
+export const LANDING_TELEMETRY_WINDOW_MS = 60_000;
+export const LANDING_TELEMETRY_GRACE_MS = 1_000;
+
 export const SHARE_TARGET = "Share";
 export const SHARE_RAM_BUFFER = 32;
 
@@ -61,13 +75,13 @@ export const CORPORATION_SERVERS = [
     "fulcrumtech",
     "ecorp",
     "megacorp",
-    "4sigma", 
+    "4sigma",
     "kuai-gong",
     "nwo",
     "omnitek",
     "blade",
     "b-and-a",
-    "clarkinc",  
+    "clarkinc",
 ];
 
 export const TARGET_ACTION: Record<TargetState, WorkerAction> = {

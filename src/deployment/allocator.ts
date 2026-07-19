@@ -84,8 +84,8 @@ export class Allocator
         const prepTargets = this.getTargetsExceptState(targets, TargetState.Farm);
         const totalRam = this.calculateTotalAvailableRam(workerAllocations);
 
-        this.allocateWorker(workerAllocations, farmTargets, jobs, pendingOperations, totalRam * FARM_RAM_RATIO);
         this.allocateWorker(workerAllocations, prepTargets, jobs, pendingOperations, totalRam * PREP_RAM_RATIO);
+        this.allocateWorker(workerAllocations, farmTargets, jobs, pendingOperations, totalRam * FARM_RAM_RATIO);
         this.allocateShare(workerAllocations, jobs);
 
         return jobs;
