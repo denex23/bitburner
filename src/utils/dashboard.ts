@@ -1,10 +1,10 @@
 import { NS } from '@ns';
 import { DASHBOARD_SNAPSHOT_FILE, TargetState, WorkerAction } from 'src/utils/constants';
 import { DashboardSnapshot } from 'src/models/dashboard-snapshot';
-import { TargetInfo } from '/src/models/target-info';
-import { Table } from '/src/debug/table';
-import { Alignment } from '/src/debug/cell-alignment';
-import { WorkerJob } from '/src/models/worker-job';
+import { TargetInfo } from 'src/models/target-info';
+import { Table } from 'src/debug/table';
+import { Alignment } from 'src/debug/cell-alignment';
+import { WorkerJob } from 'src/models/worker-job';
 
 const MONEY_ATTENTION_THRESHOLD = 0.95;
 const SECURITY_ATTENTION_OFFSET = 0.5;
@@ -196,7 +196,7 @@ function formatRemainingRuntime(ns: NS, target: TargetInfo, jobs: WorkerJob[]): 
     const remainingMs = calculateRemainingRuntime(ns, target, jobs);
 
     return remainingMs <= 0 ? "-" : formatDuration(remainingMs);
-    
+
 }
 
 function formatDuration(milliseconds: number): string
@@ -254,7 +254,7 @@ function calculateRemainingRuntime(ns: NS, target: TargetInfo, jobs: WorkerJob[]
 function calculateJobFinishAt(ns: NS, target: TargetInfo, job: WorkerJob): number
 {
     return job.createdAt
-        + (job.delayMs ?? 0)
+        + job.additionalMsec
         + calculateJobRuntime(ns, target, job.action);
 }
 
@@ -302,7 +302,7 @@ function calculateHackingIncomePerSecond(startSnapshot?: DashboardSnapshot, endS
 function filterShareJobs(jobs: WorkerJob[]): WorkerJob[]
 {
     return jobs.filter(job => WorkerAction.Share === job.action);
-} 
+}
 
 function printSection(ns: NS, title: string): void
 {

@@ -1,6 +1,6 @@
 import { WorkerAction } from "src/utils/constants";
 
-export interface WorkerJob 
+export interface WorkerJob
 {
     hostname: string;
     target: string;
@@ -8,6 +8,6 @@ export interface WorkerJob
     threads: number;
     allocatedRam: number;
     createdAt: number;
-    delayMs: number;
+    additionalMsec: number;
     batchId?: string;
 }

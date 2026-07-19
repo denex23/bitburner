@@ -27,9 +27,6 @@ import {
     WorkerAction,
 } from 'src/utils/constants';
 
-const MAX_TIMELINE_CALCULATION_ATTEMPTS = 10;
-const TIMELINE_TOLERANCE_MS = 1;
-
 type FarmThreads = {
     hack: number;
     weakenAfterHack: number;
@@ -37,7 +34,7 @@ type FarmThreads = {
     weakenAfterGrow: number;
 };
 
-type FarmDelays = {
+type FarmAdditionalMsec = {
     hack: number;
     weakenAfterHack: number;
     grow: number;
@@ -46,7 +43,7 @@ type FarmDelays = {
 
 type FarmPlan = {
     threads: FarmThreads;
-    delays: FarmDelays;
+    additionalMsec: FarmAdditionalMsec;
     totalRam: number;
 };
 
@@ -55,14 +52,14 @@ type PrepThreads = {
     weaken: number;
 };
 
-type PrepDelays = {
+type PrepAdditionalMsec = {
     grow: number;
     weaken: number;
 };
 
 type PrepPlan = {
     threads: PrepThreads;
-    delays: PrepDelays;
+    additionalMsec: PrepAdditionalMsec;
     totalRam: number;
 };
 
@@ -211,7 +208,7 @@ export class Allocator
             target,
             WorkerAction.Hack,
             plan.threads.hack,
-            plan.delays.hack,
+            plan.additionalMsec.hack,
         )) {
             return;
         }
@@ -222,7 +219,7 @@ export class Allocator
             target,
             WorkerAction.Weaken,
             plan.threads.weakenAfterHack,
-            plan.delays.weakenAfterHack,
+            plan.additionalMsec.weakenAfterHack,
         )) {
             return;
         }
@@ -233,7 +230,7 @@ export class Allocator
             target,
             WorkerAction.Grow,
             plan.threads.grow,
-            plan.delays.grow,
+            plan.additionalMsec.grow,
         )) {
             return;
         }
@@ -244,7 +241,7 @@ export class Allocator
             target,
             WorkerAction.Weaken,
             plan.threads.weakenAfterGrow,
-            plan.delays.weakenAfterGrow,
+            plan.additionalMsec.weakenAfterGrow,
         )) {
             return;
         }
@@ -275,7 +272,7 @@ export class Allocator
             target,
             WorkerAction.Grow,
             plan.threads.grow,
-            plan.delays.grow,
+            plan.additionalMsec.grow,
         )) {
             return;
         }
@@ -286,7 +283,7 @@ export class Allocator
             target,
             WorkerAction.Weaken,
             plan.threads.weaken,
-            plan.delays.weaken,
+            plan.additionalMsec.weaken,
         )) {
             return;
         }
@@ -300,7 +297,7 @@ export class Allocator
         target: TargetInfo,
         action: WorkerAction,
         threads: number,
-        delayMs: number = 0,
+        additionalMsec: number = 0,
     ): boolean
     {
         let remainingThreads = threads;
@@ -316,7 +313,7 @@ export class Allocator
                 continue;
             }
 
-            this.addJob(jobs, worker, target, action, workerThreads, delayMs);
+            this.addJob(jobs, worker, target, action, workerThreads, additionalMsec);
 
             remainingThreads -= workerThreads;
         }
@@ -375,7 +372,7 @@ export class Allocator
         target: TargetInfo,
         action: WorkerAction,
         threads: number,
-        delayMs: number = 0,
+        additionalMsec: number = 0,
     ): void
     {
         if (threads <= 0) {
@@ -389,7 +386,7 @@ export class Allocator
             action,
             threads,
             allocatedRam,
-            delayMs,
+            additionalMsec,
         });
 
     }
@@ -403,7 +400,7 @@ export class Allocator
             action: WorkerAction.Share,
             threads,
             allocatedRam,
-            delayMs: 0,
+            additionalMsec: 0,
         });
     }
 
@@ -462,7 +459,7 @@ export class Allocator
             target,
             pendingOperations,
         );
-        const delays = this.createFarmDelays(target, pendingOperations);
+        const additionalMsec = this.createFarmAdditionalMsec(target, pendingOperations);
         const maximumHackThreads = Math.min(
             this.calculateHackThreadsForServer(serverAfterPendingOperations),
             Math.floor(allowedRam / SCRIPT_RAM[WorkerAction.Hack]),
@@ -485,7 +482,7 @@ export class Allocator
 
             const candidatePlan: FarmPlan = {
                 threads,
-                delays,
+                additionalMsec,
                 totalRam: this.calculateFarmPlanRam(threads),
             };
 
@@ -544,7 +541,10 @@ export class Allocator
             + (threads.weakenAfterGrow * SCRIPT_RAM[WorkerAction.Weaken]);
     }
 
-    private createFarmDelays(target: TargetInfo, pendingOperations: ScheduledBatchOperation[]): FarmDelays
+    private createFarmAdditionalMsec(
+        target: TargetInfo,
+        pendingOperations: ScheduledBatchOperation[],
+    ): FarmAdditionalMsec
     {
         const planningStartedAt = Date.now();
         const lastPendingLandingAt = pendingOperations
@@ -554,132 +554,46 @@ export class Allocator
                 planningStartedAt,
             );
 
-        let hackLandingAt = lastPendingLandingAt + BATCH_SPACING_MS;
-        let weakenAfterHackLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 2);
-        let growLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 3);
-        let weakenAfterGrowLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 4);
-
-        let hackStartsAt = this.calculateActionStartAt(
+        const hackLandingAt = lastPendingLandingAt + BATCH_SPACING_MS;
+        const weakenAfterHackLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 2);
+        const growLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 3);
+        const weakenAfterGrowLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 4);
+        const hackActionTime = this.targetSimulator.calculateActionTimeAt(
             target,
             pendingOperations,
             WorkerAction.Hack,
-            hackLandingAt,
             planningStartedAt,
         );
-
-        let weakenAfterHackStartsAt = this.calculateActionStartAt(
-            target,
-            pendingOperations,
-            WorkerAction.Weaken,
-            weakenAfterHackLandingAt,
-            planningStartedAt,
-        );
-
-        let growStartsAt = this.calculateActionStartAt(
+        const growActionTime = this.targetSimulator.calculateActionTimeAt(
             target,
             pendingOperations,
             WorkerAction.Grow,
-            growLandingAt,
             planningStartedAt,
         );
-
-        let weakenAfterGrowStartsAt = this.calculateActionStartAt(
+        const weakenActionTime = this.targetSimulator.calculateActionTimeAt(
             target,
             pendingOperations,
             WorkerAction.Weaken,
-            weakenAfterGrowLandingAt,
             planningStartedAt,
         );
-
-        const earliestStartAt = Math.min(
-            hackStartsAt,
-            weakenAfterHackStartsAt,
-            growStartsAt,
-            weakenAfterGrowStartsAt,
+        const hackAdditionalMsec = hackLandingAt - planningStartedAt - hackActionTime;
+        const weakenAfterHackAdditionalMsec = weakenAfterHackLandingAt - planningStartedAt - weakenActionTime;
+        const growAdditionalMsec = growLandingAt - planningStartedAt - growActionTime;
+        const weakenAfterGrowAdditionalMsec = weakenAfterGrowLandingAt - planningStartedAt - weakenActionTime;
+        const minimumAdditionalMsec = Math.min(
+            hackAdditionalMsec,
+            weakenAfterHackAdditionalMsec,
+            growAdditionalMsec,
+            weakenAfterGrowAdditionalMsec,
         );
-
-        const requiredTimelineShift = Math.max(0, planningStartedAt - earliestStartAt);
-
-        hackLandingAt += requiredTimelineShift;
-        weakenAfterHackLandingAt += requiredTimelineShift;
-        growLandingAt += requiredTimelineShift;
-        weakenAfterGrowLandingAt += requiredTimelineShift;
-
-        hackStartsAt = this.calculateActionStartAt(
-            target,
-            pendingOperations,
-            WorkerAction.Hack,
-            hackLandingAt,
-            planningStartedAt,
-        );
-
-        weakenAfterHackStartsAt = this.calculateActionStartAt(
-            target,
-            pendingOperations,
-            WorkerAction.Weaken,
-            weakenAfterHackLandingAt,
-            planningStartedAt,
-        );
-
-        growStartsAt = this.calculateActionStartAt(
-            target,
-            pendingOperations,
-            WorkerAction.Grow,
-            growLandingAt,
-            planningStartedAt,
-        );
-
-        weakenAfterGrowStartsAt = this.calculateActionStartAt(
-            target,
-            pendingOperations,
-            WorkerAction.Weaken,
-            weakenAfterGrowLandingAt,
-            planningStartedAt,
-        );
-
-        const delayReferenceAt = Date.now();
+        const requiredTimelineShift = Math.max(0, -minimumAdditionalMsec);
 
         return {
-            hack: Math.max(0, hackStartsAt - delayReferenceAt),
-            weakenAfterHack: Math.max(0, weakenAfterHackStartsAt - delayReferenceAt),
-            grow: Math.max(0, growStartsAt - delayReferenceAt),
-            weakenAfterGrow: Math.max(0, weakenAfterGrowStartsAt - delayReferenceAt),
+            hack: hackAdditionalMsec + requiredTimelineShift,
+            weakenAfterHack: weakenAfterHackAdditionalMsec + requiredTimelineShift,
+            grow: growAdditionalMsec + requiredTimelineShift,
+            weakenAfterGrow: weakenAfterGrowAdditionalMsec + requiredTimelineShift,
         };
-    }
-
-    private calculateActionStartAt(
-        target: TargetInfo,
-        pendingOperations: ScheduledBatchOperation[],
-        action: WorkerAction,
-        landingAt: number,
-        earliestStartAt: number,
-    ): number
-    {
-        let startsAt = landingAt - this.targetSimulator.calculateActionTimeAt(
-            target,
-            pendingOperations,
-            action,
-            earliestStartAt,
-        );
-
-        for (let attempt = 0; attempt < MAX_TIMELINE_CALCULATION_ATTEMPTS; attempt++) {
-            const simulationAt = Math.max(earliestStartAt, startsAt);
-            const actionTime = this.targetSimulator.calculateActionTimeAt(
-                target,
-                pendingOperations,
-                action,
-                simulationAt,
-            );
-            const calculatedStartsAt = landingAt - actionTime;
-
-            if (Math.abs(calculatedStartsAt - startsAt) <= TIMELINE_TOLERANCE_MS) {
-                return calculatedStartsAt;
-            }
-
-            startsAt = calculatedStartsAt;
-        }
-
-        return startsAt;
     }
 
     private createPrepPlan(
@@ -692,7 +606,7 @@ export class Allocator
             target,
             pendingOperations,
         );
-        const delays = this.createPrepDelays(target, pendingOperations);
+        const additionalMsec = this.createPrepAdditionalMsec(target, pendingOperations);
         const maximumGrowThreads = Math.min(
             this.calculateGrowThreadsForServer(serverAfterPendingOperations),
             Math.floor(allowedRam / SCRIPT_RAM[WorkerAction.Grow]),
@@ -715,7 +629,7 @@ export class Allocator
 
             const candidatePlan: PrepPlan = {
                 threads,
-                delays,
+                additionalMsec,
                 totalRam: this.calculatePrepPlanRam(threads),
             };
 
@@ -752,7 +666,10 @@ export class Allocator
             + (threads.weaken * SCRIPT_RAM[WorkerAction.Weaken]);
     }
 
-    private createPrepDelays(target: TargetInfo, pendingOperations: ScheduledBatchOperation[]): PrepDelays
+    private createPrepAdditionalMsec(
+        target: TargetInfo,
+        pendingOperations: ScheduledBatchOperation[],
+    ): PrepAdditionalMsec
     {
         const planningStartedAt = Date.now();
         const lastPendingLandingAt = pendingOperations
@@ -762,52 +679,28 @@ export class Allocator
                 planningStartedAt,
             );
 
-        let growLandingAt = lastPendingLandingAt + BATCH_SPACING_MS;
-        let weakenLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 2);
-
-        let growStartsAt = this.calculateActionStartAt(
+        const growLandingAt = lastPendingLandingAt + BATCH_SPACING_MS;
+        const weakenLandingAt = lastPendingLandingAt + (BATCH_SPACING_MS * 2);
+        const growActionTime = this.targetSimulator.calculateActionTimeAt(
             target,
             pendingOperations,
             WorkerAction.Grow,
-            growLandingAt,
             planningStartedAt,
         );
-
-        let weakenStartsAt = this.calculateActionStartAt(
+        const weakenActionTime = this.targetSimulator.calculateActionTimeAt(
             target,
             pendingOperations,
             WorkerAction.Weaken,
-            weakenLandingAt,
             planningStartedAt,
         );
-
-        const earliestStartAt = Math.min(growStartsAt, weakenStartsAt);
-        const requiredTimelineShift = Math.max(0, planningStartedAt - earliestStartAt);
-
-        growLandingAt += requiredTimelineShift;
-        weakenLandingAt += requiredTimelineShift;
-
-        growStartsAt = this.calculateActionStartAt(
-            target,
-            pendingOperations,
-            WorkerAction.Grow,
-            growLandingAt,
-            planningStartedAt,
-        );
-
-        weakenStartsAt = this.calculateActionStartAt(
-            target,
-            pendingOperations,
-            WorkerAction.Weaken,
-            weakenLandingAt,
-            planningStartedAt,
-        );
-
-        const delayReferenceAt = Date.now();
+        const growAdditionalMsec = growLandingAt - planningStartedAt - growActionTime;
+        const weakenAdditionalMsec = weakenLandingAt - planningStartedAt - weakenActionTime;
+        const minimumAdditionalMsec = Math.min(growAdditionalMsec, weakenAdditionalMsec);
+        const requiredTimelineShift = Math.max(0, -minimumAdditionalMsec);
 
         return {
-            grow: Math.max(0, growStartsAt - delayReferenceAt),
-            weaken: Math.max(0, weakenStartsAt - delayReferenceAt),
+            grow: growAdditionalMsec + requiredTimelineShift,
+            weaken: weakenAdditionalMsec + requiredTimelineShift,
         };
     }
 

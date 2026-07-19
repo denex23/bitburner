@@ -102,7 +102,7 @@ export class Deployer
         const ns = this.context.ns;
         const scriptArguments: (string | number)[] = [
             job.target,
-            job.delayMs,
+            job.additionalMsec,
         ];
 
         if (WorkerAction.Share !== job.action) {
@@ -146,7 +146,7 @@ export class Deployer
                 SCRIPT_MAP[job.action],
                 job.target,
                 job.threads,
-                job.delayMs,
+                job.additionalMsec,
                 job.batchId,
             ));
         }
@@ -154,9 +154,16 @@ export class Deployer
         return desiredJobKeys;
     }
 
-    private createJobKey(hostname: string, script: string, target: string, threads: number, delayMs: number, batchId: string): string
+    private createJobKey(
+        hostname: string,
+        script: string,
+        target: string,
+        threads: number,
+        additionalMsec: number,
+        batchId: string,
+    ): string
     {
-        return `${hostname}|${script}|${target}|${threads}|${delayMs}|${batchId}`;
+        return `${hostname}|${script}|${target}|${threads}|${additionalMsec}|${batchId}`;
     }
 
     private isJobRunning(job: BatchWorkerJob, script: string): boolean
@@ -165,7 +172,7 @@ export class Deployer
             process.filename === script
             && process.threads === job.threads
             && String(process.args[0] ?? "") === job.target
-            && Number(process.args[1] ?? 0) === job.delayMs
+            && Number(process.args[1] ?? 0) === job.additionalMsec
             && String(process.args[2] ?? "") === job.batchId
         );
     }
@@ -187,7 +194,7 @@ export class Deployer
             }
 
             const target = String(process.args[0]);
-            const delayMs = Number(process.args[1]);
+            const additionalMsec = Number(process.args[1]);
             const batchId = process.args[2];
 
             if ("string" !== typeof batchId || batchId.length <= 0) {
@@ -195,7 +202,14 @@ export class Deployer
                 continue;
             }
 
-            const jobKey = this.createJobKey(worker.hostname, process.filename, target, process.threads, delayMs, batchId);
+            const jobKey = this.createJobKey(
+                worker.hostname,
+                process.filename,
+                target,
+                process.threads,
+                additionalMsec,
+                batchId,
+            );
 
             if (false === desiredJobs.has(jobKey)) {
                 this.context.ns.kill(process.pid);

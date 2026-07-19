@@ -8,7 +8,7 @@ import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
 import { SCRIPT_MAP, TargetState, WorkerAction } from "src/utils/constants";
 
-export class DebugReporter 
+export class DebugReporter
 {
     constructor(private readonly context: Context) {}
 
@@ -52,7 +52,7 @@ export class DebugReporter
         }));
     }
 
-    private printTargets(rows: TargetRow[]): void 
+    private printTargets(rows: TargetRow[]): void
     {
         const ns = this.context.ns;
         this.printSection("Targets");
@@ -96,7 +96,7 @@ export class DebugReporter
 
             if (undefined !== job.batchId) {
                 batchIds.add(job.batchId);
-                operationKeys.add(`${job.batchId}|${job.action}|${job.delayMs}`);
+                operationKeys.add(`${job.batchId}|${job.action}|${job.additionalMsec}`);
             }
 
             batchIdsByTarget.set(job.target, batchIds);
@@ -110,8 +110,8 @@ export class DebugReporter
                 row.actions = (row.actions.includes(job.action)) ? row.actions : [...row.actions, job.action];
                 row.threadsByAction[job.action] = (row.threadsByAction[job.action] ?? 0) + job.threads;
                 row.ram += job.allocatedRam;
-                row.minDelayMs = Math.min(row.minDelayMs, job.delayMs);
-                row.maxDelayMs = Math.max(row.maxDelayMs, job.delayMs);
+                row.minimumAdditionalMsec = Math.min(row.minimumAdditionalMsec, job.additionalMsec);
+                row.maximumAdditionalMsec = Math.max(row.maximumAdditionalMsec, job.additionalMsec);
 
                 continue;
             }
@@ -124,15 +124,15 @@ export class DebugReporter
                 processes: 1,
                 threadsByAction: { [job.action]: job.threads },
                 ram: job.allocatedRam,
-                minDelayMs: job.delayMs,
-                maxDelayMs: job.delayMs,
+                minimumAdditionalMsec: job.additionalMsec,
+                maximumAdditionalMsec: job.additionalMsec,
             });
         }
 
         return [...rows.values()];
     }
 
-    private printAllocation(rows: AllocationRow[]): void 
+    private printAllocation(rows: AllocationRow[]): void
     {
         const ns = this.context.ns;
         this.printSection("Allocation");
@@ -144,7 +144,7 @@ export class DebugReporter
             .column("Action types")
             .column("Processes", undefined, Alignment.Right)
             .column("Threads", undefined, Alignment.Right)
-            .column("Delay", undefined, Alignment.Right)
+            .column("Additional", undefined, Alignment.Right)
             .column("RAM", undefined, Alignment.Right);
 
         for (const row of rows) {
@@ -155,7 +155,7 @@ export class DebugReporter
                 this.formatActions(row.actions),
                 row.processes.toString(),
                 this.formatThreadsByAction(row.threadsByAction),
-                this.formatDelay(row.minDelayMs, row.maxDelayMs),
+                this.formatAdditionalMsec(row.minimumAdditionalMsec, row.maximumAdditionalMsec),
                 ns.format.ram(row.ram)
             );
         }
@@ -163,7 +163,7 @@ export class DebugReporter
         this.printTable(table);
     }
 
-    private reportWorkers(servers: ServerInfo[]): void 
+    private reportWorkers(servers: ServerInfo[]): void
     {
         const actionCounts = new Map<string, number>();
 
@@ -217,7 +217,7 @@ export class DebugReporter
         this.printTable(table);
     }
 
-    private reportStaleWorkers(servers: ServerInfo[], jobs: WorkerJob[]): void 
+    private reportStaleWorkers(servers: ServerInfo[], jobs: WorkerJob[]): void
     {
         const usedHosts = new Set(jobs.map(job => job.hostname));
         const staleHosts: string[] = [];
@@ -287,13 +287,13 @@ export class DebugReporter
             .join("/");
     }
 
-    private formatDelay(minDelayMs: number, maxDelayMs: number): string
+    private formatAdditionalMsec(minimumAdditionalMsec: number, maximumAdditionalMsec: number): string
     {
-        if (minDelayMs === maxDelayMs) {
-            return this.formatMilliseconds(minDelayMs);
+        if (minimumAdditionalMsec === maximumAdditionalMsec) {
+            return this.formatMilliseconds(minimumAdditionalMsec);
         }
 
-        return `${this.formatMilliseconds(minDelayMs)} - ${this.formatMilliseconds(maxDelayMs)}`;
+        return `${this.formatMilliseconds(minimumAdditionalMsec)} - ${this.formatMilliseconds(maximumAdditionalMsec)}`;
     }
 
     private formatMilliseconds(value: number): string
@@ -329,18 +329,18 @@ export class DebugReporter
         return "other";
     }
 
-    private print(message: string): void 
+    private print(message: string): void
     {
         this.context.ns.print(message);
     }
 
-    private printSection(title: string): void 
+    private printSection(title: string): void
     {
         this.print(" ");
         this.print(`===== ${title.toUpperCase()} =====`);
     }
 
-    private printTable(table: Table): void 
+    private printTable(table: Table): void
     {
         for (const line of table.render()) {
             this.print(line);

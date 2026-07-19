@@ -1,11 +1,7 @@
-export async function main(ns) 
+export async function main(ns)
 {
     const target = String(ns.args[0]);
-    const delayMs = Number(ns.args[1] ?? 0);
+    const additionalMsec = Number(ns.args[1]);
 
-    if (delayMs > 0) {
-        await ns.sleep(delayMs);
-    }
-
-    await ns.grow(target);
+    await ns.grow(target, { additionalMsec });
 }

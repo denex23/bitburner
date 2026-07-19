@@ -110,7 +110,7 @@ export class BatchScheduler
         const operationsByKey = new Map<string, ScheduledBatchOperation>();
 
         for (const job of jobs) {
-            const operationKey = `${job.action}|${job.delayMs}`;
+            const operationKey = `${job.action}|${job.additionalMsec}`;
             const operation = operationsByKey.get(operationKey);
             const fragment: ScheduledOperationFragment = {
                 hostname: job.hostname,
@@ -125,7 +125,7 @@ export class BatchScheduler
                 continue;
             }
 
-            const startsAt = registeredAt + job.delayMs;
+            const startsAt = registeredAt;
 
             operationsByKey.set(operationKey, {
                 batchId,
@@ -133,50 +133,18 @@ export class BatchScheduler
                 action: job.action,
                 threads: job.threads,
                 startsAt,
+                additionalMsec: job.additionalMsec,
                 landingAt: startsAt + this.targetSimulator.calculateActionTimeAt(
                     targetInfo,
                     pendingOperations,
                     job.action,
                     startsAt,
-                ),
+                ) + job.additionalMsec,
                 fragments: [fragment],
             });
         }
 
-        return this.calculateLandingTimes(
-            targetInfo,
-            pendingOperations,
-            [...operationsByKey.values()],
-        );
-    }
-
-    private calculateLandingTimes(
-        target: TargetInfo,
-        pendingOperations: ScheduledBatchOperation[],
-        operations: ScheduledBatchOperation[],
-    ): ScheduledBatchOperation[]
-    {
-        const timelineOperations = pendingOperations.filter(operation => operation.target === target.hostname);
-        const operationsByStart = [...operations].sort((left, right) => left.startsAt - right.startsAt);
-        const scheduledOperations: ScheduledBatchOperation[] = [];
-
-        for (const operation of operationsByStart) {
-            const scheduledOperation = {
-                ...operation,
-                landingAt: operation.startsAt
-                    + this.targetSimulator.calculateActionTimeAt(
-                        target,
-                        timelineOperations,
-                        operation.action,
-                        operation.startsAt,
-                    ),
-            };
-
-            timelineOperations.push(scheduledOperation);
-            scheduledOperations.push(scheduledOperation);
-        }
-
-        return scheduledOperations
+        return [...operationsByKey.values()]
             .sort((left, right) => left.landingAt - right.landingAt);
     }
 

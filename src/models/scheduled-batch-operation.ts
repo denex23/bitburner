@@ -8,6 +8,7 @@ export interface ScheduledBatchOperation
     action: WorkerAction;
     threads: number;
     startsAt: number;
+    additionalMsec: number;
     landingAt: number;
     fragments: ScheduledOperationFragment[];
 }

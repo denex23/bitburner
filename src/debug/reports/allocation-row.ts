@@ -9,6 +9,6 @@ export interface AllocationRow
     processes: number;
     threadsByAction: Partial<Record<WorkerAction, number>>;
     ram: number;
-    minDelayMs: number;
-    maxDelayMs: number;
+    minimumAdditionalMsec: number;
+    maximumAdditionalMsec: number;
 }
