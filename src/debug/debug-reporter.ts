@@ -10,6 +10,15 @@ import { SCRIPT_MAP, TargetState, WorkerAction } from "src/utils/constants";
 import { LandingTelemetrySample } from "src/models/landing-telemetry-sample";
 import { LandingTelemetryRow } from "src/debug/reports/landing-telemetry-row";
 import { LandingTelemetrySnapshot } from "src/models/landing-telemetry-snapshot";
+import { LandingTelemetryOperation } from "src/models/landing-telemetry-operation";
+import { LandingOrderRow } from "src/debug/reports/landing-order-row";
+
+type LandingOrderSample = {
+    transition: string;
+    gapMs: number;
+    target: string;
+    batchId: string;
+};
 
 export class DebugReporter
 {
@@ -25,8 +34,142 @@ export class DebugReporter
         this.reportTargets(targets, jobs);
         this.reportAllocation(jobs);
         this.reportLandingTelemetry(landingTelemetry);
+        this.reportLandingOrder(landingTelemetry);
         this.reportWorkers(servers);
         //this.reportStaleWorkers(servers, jobs);
+    }
+
+    private reportLandingOrder(telemetry: LandingTelemetrySnapshot): void
+    {
+        const samples = this.createLandingOrderSamples(telemetry);
+
+        if (samples.length <= 0) {
+            return;
+        }
+
+        this.printLandingOrder(this.buildLandingOrderReport(samples), samples);
+    }
+
+    private createLandingOrderSamples(telemetry: LandingTelemetrySnapshot): LandingOrderSample[]
+    {
+        const operationsByBatch = new Map<string, LandingTelemetryOperation[]>();
+
+        for (const operation of telemetry.operations) {
+            operationsByBatch.set(
+                operation.batchId,
+                [...(operationsByBatch.get(operation.batchId) ?? []), operation],
+            );
+        }
+
+        const samples: LandingOrderSample[] = [];
+
+        for (const operations of operationsByBatch.values()) {
+            const orderedOperations = operations.sort(
+                (left, right) => left.expectedLandingAt - right.expectedLandingAt
+            );
+
+            for (let operationIndex = 0; operationIndex < orderedOperations.length - 1; operationIndex++) {
+                const currentOperation = orderedOperations[operationIndex];
+                const nextOperation = orderedOperations[operationIndex + 1];
+                const currentLandingTimes = this.getCompleteOperationLandingTimes(currentOperation, telemetry);
+                const nextLandingTimes = this.getCompleteOperationLandingTimes(nextOperation, telemetry);
+
+                if (null === currentLandingTimes || null === nextLandingTimes) {
+                    continue;
+                }
+
+                samples.push({
+                    transition: `${currentOperation.action} → ${nextOperation.action}`,
+                    gapMs: Math.min(...nextLandingTimes) - Math.max(...currentLandingTimes),
+                    target: currentOperation.target,
+                    batchId: currentOperation.batchId,
+                });
+            }
+        }
+
+        return samples;
+    }
+
+    private getCompleteOperationLandingTimes(
+        operation: LandingTelemetryOperation,
+        telemetry: LandingTelemetrySnapshot,
+    ): number[] | null
+    {
+        const landingTimes = telemetry.samples
+            .filter(sample =>
+                sample.batchId === operation.batchId
+                && sample.action === operation.action
+                && sample.additionalMsec === operation.additionalMsec
+            )
+            .map(sample => sample.landedAt);
+
+        return landingTimes.length === operation.expectedFragments ? landingTimes : null;
+    }
+
+    private buildLandingOrderReport(samples: LandingOrderSample[]): LandingOrderRow[]
+    {
+        const samplesByTransition = new Map<string, LandingOrderSample[]>();
+
+        for (const sample of samples) {
+            samplesByTransition.set(
+                sample.transition,
+                [...(samplesByTransition.get(sample.transition) ?? []), sample],
+            );
+        }
+
+        return [...samplesByTransition.entries()].map(([transition, transitionSamples]) => {
+            const worstSample = transitionSamples.reduce((worst, sample) =>
+                sample.gapMs < worst.gapMs ? sample : worst
+            );
+
+            return {
+                transition,
+                samples: transitionSamples.length,
+                averageGapMs: transitionSamples.reduce((sum, sample) => sum + sample.gapMs, 0)
+                    / transitionSamples.length,
+                minimumGapMs: worstSample.gapMs,
+                maximumGapMs: Math.max(...transitionSamples.map(sample => sample.gapMs)),
+                orderViolations: transitionSamples.filter(sample => sample.gapMs <= 0).length,
+                worstTarget: worstSample.target,
+            };
+        });
+    }
+
+    private printLandingOrder(rows: LandingOrderRow[], samples: LandingOrderSample[]): void
+    {
+        this.printSection("Landing Order (60s)");
+
+        const table = new Table()
+            .column("Transition")
+            .column("Samples", undefined, Alignment.Right)
+            .column("Average gap", undefined, Alignment.Right)
+            .column("Minimum", undefined, Alignment.Right)
+            .column("Maximum", undefined, Alignment.Right)
+            .column("Violations", undefined, Alignment.Right)
+            .column("Worst target");
+
+        for (const row of rows) {
+            table.row(
+                row.transition,
+                row.samples.toString(),
+                this.formatGapMilliseconds(row.averageGapMs),
+                this.formatGapMilliseconds(row.minimumGapMs),
+                this.formatGapMilliseconds(row.maximumGapMs),
+                row.orderViolations.toString(),
+                row.worstTarget,
+            );
+        }
+
+        this.printTable(table);
+
+        const worstSample = samples.reduce((worst, sample) =>
+            sample.gapMs < worst.gapMs ? sample : worst
+        );
+
+        this.print(
+            `Worst batch: ${worstSample.target} | ${worstSample.transition} | `
+            + `${this.formatGapMilliseconds(worstSample.gapMs)} | ${worstSample.batchId}`
+        );
     }
 
     private reportLandingTelemetry(telemetry: LandingTelemetrySnapshot): void
@@ -454,6 +597,15 @@ export class DebugReporter
         }
 
         return "0ms";
+    }
+
+    private formatGapMilliseconds(value: number): string
+    {
+        if (value < 0) {
+            return `-${this.formatMilliseconds(Math.abs(value))}`;
+        }
+
+        return this.formatMilliseconds(value);
     }
 
     private getActionFromFilename(filename: string): string {
