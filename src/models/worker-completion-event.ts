@@ -7,6 +7,7 @@ export interface WorkerCompletionEvent
     action: WorkerAction;
     hostname: string;
     threads: number;
+    operationIndex: number;
     additionalMsec: number;
     landedAt: number;
 }

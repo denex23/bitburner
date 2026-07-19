@@ -11,6 +11,7 @@ import { isWorkerServer } from 'src/deployment/worker-helper';
 
 type BatchWorkerJob = WorkerJob & {
     batchId: string;
+    operationIndex: number;
 };
 
 export class Deployer
@@ -50,9 +51,10 @@ export class Deployer
             return;
         }
 
-        if (false === this.hasBatchId(job)) {
+        if (false === this.isBatchWorkerJob(job)) {
             this.context.ns.tprint(
-                `[INVALID JOB] Missing batchId: ${job.hostname} -> ${job.action} ${job.target}`
+                `[INVALID JOB] Missing batchId or operationIndex: `
+                + `${job.hostname} -> ${job.action} ${job.target}`
             );
 
             return;
@@ -105,16 +107,16 @@ export class Deployer
 
     private executeJob(job: WorkerJob, script: string): void
     {
-        const ns = this.context.ns;
         const scriptArguments: (string | number)[] = [
             job.target,
             job.additionalMsec,
         ];
 
         if (WorkerAction.Share !== job.action) {
-            if (this.hasBatchId(job)) {
+            if (this.isBatchWorkerJob(job)) {
                 scriptArguments.push(
                     job.batchId,
+                    job.operationIndex,
                     job.hostname,
                     job.threads,
                     this.getNextTelemetryPort(),
@@ -125,7 +127,7 @@ export class Deployer
             }
         }
 
-        const processId = ns.exec(
+        const processId = this.context.ns.exec(
             script,
             job.hostname,
             job.threads,
@@ -158,7 +160,7 @@ export class Deployer
         const desiredJobKeys = new Set<string>();
 
         for (const job of jobs) {
-            if (WorkerAction.Share === job.action || false === this.hasBatchId(job)) {
+            if (WorkerAction.Share === job.action || false === this.isBatchWorkerJob(job)) {
                 continue;
             }
 
@@ -169,6 +171,7 @@ export class Deployer
                 job.threads,
                 job.additionalMsec,
                 job.batchId,
+                job.operationIndex,
             ));
         }
 
@@ -182,9 +185,10 @@ export class Deployer
         threads: number,
         additionalMsec: number,
         batchId: string,
+        operationIndex: number,
     ): string
     {
-        return `${hostname}|${script}|${target}|${threads}|${additionalMsec}|${batchId}`;
+        return `${hostname}|${script}|${target}|${threads}|${additionalMsec}|${batchId}|${operationIndex}`;
     }
 
     private isJobRunning(job: BatchWorkerJob, script: string): boolean
@@ -195,12 +199,17 @@ export class Deployer
             && String(process.args[0] ?? "") === job.target
             && Number(process.args[1] ?? 0) === job.additionalMsec
             && String(process.args[2] ?? "") === job.batchId
+            && Number(process.args[3] ?? -1) === job.operationIndex
         );
     }
 
-    private hasBatchId(job: WorkerJob): job is BatchWorkerJob
+    private isBatchWorkerJob(job: WorkerJob): job is BatchWorkerJob
     {
-        return undefined !== job.batchId && job.batchId.length > 0;
+        return undefined !== job.batchId
+            && job.batchId.length > 0
+            && undefined !== job.operationIndex
+            && Number.isInteger(job.operationIndex)
+            && job.operationIndex >= 0;
     }
 
     private stopObsoleteProcesses(worker: ServerInfo, desiredJobs: Set<string>): void
@@ -217,8 +226,14 @@ export class Deployer
             const target = String(process.args[0]);
             const additionalMsec = Number(process.args[1]);
             const batchId = process.args[2];
+            const operationIndex = Number(process.args[3]);
 
-            if ("string" !== typeof batchId || batchId.length <= 0) {
+            if (
+                "string" !== typeof batchId
+                || batchId.length <= 0
+                || false === Number.isInteger(operationIndex)
+                || operationIndex < 0
+            ) {
                 this.context.ns.kill(process.pid);
                 continue;
             }
@@ -230,6 +245,7 @@ export class Deployer
                 process.threads,
                 additionalMsec,
                 batchId,
+                operationIndex,
             );
 
             if (false === desiredJobs.has(jobKey)) {

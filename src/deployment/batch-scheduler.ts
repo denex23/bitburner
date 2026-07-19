@@ -2,6 +2,12 @@ import { Context } from "src/models/context";
 import { TargetInfo } from "src/models/target-info";
 import { WorkerJob } from "src/models/worker-job";
 import { ScheduledBatchOperation } from "src/models/scheduled-batch-operation";
+import { ScheduledOperationFragment } from "src/models/scheduled-operation-fragment";
+import { TargetSimulator } from "src/deployment/target-simulator";
+import { WorkerCompletionEvent } from "src/models/worker-completion-event";
+import { LandingTelemetrySample } from "src/models/landing-telemetry-sample";
+import { LandingTelemetryOperation } from "src/models/landing-telemetry-operation";
+import { LandingTelemetrySnapshot } from "src/models/landing-telemetry-snapshot";
 import {
     LANDING_TELEMETRY_WINDOW_MS,
     LANDING_TELEMETRY_GRACE_MS,
@@ -11,12 +17,6 @@ import {
     WORKER_COMPLETION_FAILURE_PORT,
     WORKER_COMPLETION_PORTS,
 } from "src/utils/constants";
-import { ScheduledOperationFragment } from "src/models/scheduled-operation-fragment";
-import { TargetSimulator } from "src/deployment/target-simulator";
-import { WorkerCompletionEvent } from "src/models/worker-completion-event";
-import { LandingTelemetrySample } from "src/models/landing-telemetry-sample";
-import { LandingTelemetryOperation } from "src/models/landing-telemetry-operation";
-import { LandingTelemetrySnapshot } from "src/models/landing-telemetry-snapshot";
 
 type ActiveBatch = {
     batchId: string;
@@ -24,6 +24,10 @@ type ActiveBatch = {
     finishAt: number;
     jobs: WorkerJob[];
     operations: ScheduledBatchOperation[];
+};
+
+type ScheduledWorkerJob = WorkerJob & {
+    operationIndex: number;
 };
 
 export class BatchScheduler
@@ -76,6 +80,7 @@ export class BatchScheduler
                 batchId: operation.batchId,
                 target: operation.target,
                 action: operation.action,
+                operationIndex: operation.operationIndex,
                 additionalMsec: operation.additionalMsec,
                 expectedLandingAt: operation.landingAt,
                 expectedFragments: operation.fragments.length,
@@ -102,6 +107,8 @@ export class BatchScheduler
 
         for (const [target, targetJobs] of jobsByTarget) {
             const targetInfo = targetsByHostname.get(target);
+
+            this.assertScheduledWorkerJobs(targetJobs);
 
             if (undefined === targetInfo) {
                 continue;
@@ -161,16 +168,15 @@ export class BatchScheduler
         batchId: string,
         target: string,
         targetInfo: TargetInfo,
-        jobs: WorkerJob[],
+        jobs: ScheduledWorkerJob[],
         registeredAt: number,
         pendingOperations: ScheduledBatchOperation[],
     ): ScheduledBatchOperation[]
     {
-        const operationsByKey = new Map<string, ScheduledBatchOperation>();
+        const operationsByIndex = new Map<number, ScheduledBatchOperation>();
 
         for (const job of jobs) {
-            const operationKey = `${job.action}|${job.additionalMsec}`;
-            const operation = operationsByKey.get(operationKey);
+            const operation = operationsByIndex.get(job.operationIndex);
             const fragment: ScheduledOperationFragment = {
                 hostname: job.hostname,
                 threads: job.threads,
@@ -186,7 +192,7 @@ export class BatchScheduler
 
             const startsAt = registeredAt;
 
-            operationsByKey.set(operationKey, {
+            operationsByIndex.set(job.operationIndex, {
                 batchId,
                 target,
                 action: job.action,
@@ -199,12 +205,26 @@ export class BatchScheduler
                     job.action,
                     startsAt,
                 ) + job.additionalMsec,
+                operationIndex: job.operationIndex,
                 fragments: [fragment],
             });
         }
 
-        return [...operationsByKey.values()]
+        return [...operationsByIndex.values()]
             .sort((left, right) => left.landingAt - right.landingAt);
+    }
+
+    private assertScheduledWorkerJobs(jobs: WorkerJob[]): asserts jobs is ScheduledWorkerJob[]
+    {
+        const hasInvalidOperationIndex = jobs.some(job =>
+            undefined === job.operationIndex
+            || false === Number.isInteger(job.operationIndex)
+            || job.operationIndex < 0
+        );
+
+        if (hasInvalidOperationIndex) {
+            throw new Error("Cannot register scheduled jobs with an invalid operationIndex.");
+        }
     }
 
     private groupBatchJobsByTarget(jobs: WorkerJob[]): Map<string, WorkerJob[]>
@@ -263,6 +283,15 @@ export class BatchScheduler
                 continue;
             }
 
+            const eventMatchesOperation = operation.target === portData.target
+                && operation.action === portData.action
+                && operation.additionalMsec === portData.additionalMsec;
+
+            if (false === eventMatchesOperation) {
+                this.unmatchedTelemetryEvents.push(portData.landedAt);
+                continue;
+            }
+
             const fragmentWasScheduled = operation.fragments.some(fragment =>
                 fragment.hostname === portData.hostname
                 && fragment.threads === portData.threads
@@ -275,8 +304,7 @@ export class BatchScheduler
 
             const fragmentWasAlreadyReported = this.landingTelemetrySamples.some(sample =>
                 sample.batchId === portData.batchId
-                && sample.action === portData.action
-                && sample.additionalMsec === portData.additionalMsec
+                && sample.operationIndex === portData.operationIndex
                 && sample.hostname === portData.hostname
                 && sample.threads === portData.threads
             );
@@ -323,11 +351,10 @@ export class BatchScheduler
 
     private createOperationKey(operation: {
         batchId: string;
-        action: WorkerAction;
-        additionalMsec: number;
+        operationIndex: number;
     }): string
     {
-        return `${operation.batchId}|${operation.action}|${operation.additionalMsec}`;
+        return `${operation.batchId}|${operation.operationIndex}`;
     }
 
     private findScheduledOperation(event: WorkerCompletionEvent): ScheduledBatchOperation | undefined
@@ -335,11 +362,7 @@ export class BatchScheduler
         const activeOperation = [...this.activeBatches.values()]
             .flatMap(batches => batches)
             .find(batch => batch.batchId === event.batchId)
-            ?.operations.find(operation =>
-                operation.target === event.target
-                && operation.action === event.action
-                && operation.additionalMsec === event.additionalMsec
-            );
+            ?.operations.find(operation => operation.operationIndex === event.operationIndex);
 
         if (undefined !== activeOperation) {
             return activeOperation;
@@ -347,9 +370,7 @@ export class BatchScheduler
 
         return this.recentScheduledOperations.find(operation =>
             operation.batchId === event.batchId
-            && operation.target === event.target
-            && operation.action === event.action
-            && operation.additionalMsec === event.additionalMsec
+            && operation.operationIndex === event.operationIndex
         );
     }
 
@@ -367,6 +388,9 @@ export class BatchScheduler
             && "string" === typeof event.hostname
             && "number" === typeof event.threads
             && Number.isFinite(event.threads)
+            && "number" === typeof event.operationIndex
+            && Number.isInteger(event.operationIndex)
+            && event.operationIndex >= 0
             && "number" === typeof event.additionalMsec
             && Number.isFinite(event.additionalMsec)
             && "number" === typeof event.landedAt

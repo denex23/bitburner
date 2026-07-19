@@ -98,8 +98,7 @@ export class DebugReporter
         const landingTimes = telemetry.samples
             .filter(sample =>
                 sample.batchId === operation.batchId
-                && sample.action === operation.action
-                && sample.additionalMsec === operation.additionalMsec
+                && sample.operationIndex === operation.operationIndex
             )
             .map(sample => sample.landedAt);
 
@@ -245,7 +244,7 @@ export class DebugReporter
         const landingTimesByOperation = new Map<string, number[]>();
 
         for (const sample of samples) {
-            const operationKey = `${sample.batchId}|${sample.action}|${sample.additionalMsec}`;
+            const operationKey = `${sample.batchId}|${sample.operationIndex}`;
 
             landingTimesByOperation.set(
                 operationKey,
@@ -369,9 +368,9 @@ export class DebugReporter
             const batchIds = batchIdsByTarget.get(job.target) ?? new Set<string>();
             const operationKeys = operationKeysByTarget.get(job.target) ?? new Set<string>();
 
-            if (undefined !== job.batchId) {
+            if (undefined !== job.batchId && undefined !== job.operationIndex) {
                 batchIds.add(job.batchId);
-                operationKeys.add(`${job.batchId}|${job.action}|${job.additionalMsec}`);
+                operationKeys.add(`${job.batchId}|${job.operationIndex}`);
             }
 
             batchIdsByTarget.set(job.target, batchIds);

@@ -63,6 +63,20 @@ type PrepPlan = {
     totalRam: number;
 };
 
+const FARM_OPERATION_INDEX = {
+    Hack: 0,
+    WeakenAfterHack: 1,
+    Grow: 2,
+    WeakenAfterGrow: 3,
+} as const;
+
+const PREP_OPERATION_INDEX = {
+    Grow: 0,
+    Weaken: 1,
+} as const;
+
+const SINGLE_OPERATION_INDEX = 0;
+
 export class Allocator
 {
     private readonly targetSimulator: TargetSimulator;
@@ -182,6 +196,7 @@ export class Allocator
             target,
             action,
             this.calculateThreads(allowedRam, target, action),
+            SINGLE_OPERATION_INDEX,
         );
     }
 
@@ -208,6 +223,7 @@ export class Allocator
             target,
             WorkerAction.Hack,
             plan.threads.hack,
+            FARM_OPERATION_INDEX.Hack,
             plan.additionalMsec.hack,
         )) {
             return;
@@ -219,6 +235,7 @@ export class Allocator
             target,
             WorkerAction.Weaken,
             plan.threads.weakenAfterHack,
+            FARM_OPERATION_INDEX.WeakenAfterHack,
             plan.additionalMsec.weakenAfterHack,
         )) {
             return;
@@ -230,6 +247,7 @@ export class Allocator
             target,
             WorkerAction.Grow,
             plan.threads.grow,
+            FARM_OPERATION_INDEX.Grow,
             plan.additionalMsec.grow,
         )) {
             return;
@@ -241,6 +259,7 @@ export class Allocator
             target,
             WorkerAction.Weaken,
             plan.threads.weakenAfterGrow,
+            FARM_OPERATION_INDEX.WeakenAfterGrow,
             plan.additionalMsec.weakenAfterGrow,
         )) {
             return;
@@ -272,6 +291,7 @@ export class Allocator
             target,
             WorkerAction.Grow,
             plan.threads.grow,
+            PREP_OPERATION_INDEX.Grow,
             plan.additionalMsec.grow,
         )) {
             return;
@@ -283,6 +303,7 @@ export class Allocator
             target,
             WorkerAction.Weaken,
             plan.threads.weaken,
+            PREP_OPERATION_INDEX.Weaken,
             plan.additionalMsec.weaken,
         )) {
             return;
@@ -297,6 +318,7 @@ export class Allocator
         target: TargetInfo,
         action: WorkerAction,
         threads: number,
+        operationIndex: number,
         additionalMsec: number = 0,
     ): boolean
     {
@@ -313,7 +335,7 @@ export class Allocator
                 continue;
             }
 
-            this.addJob(jobs, worker, target, action, workerThreads, additionalMsec);
+            this.addJob(jobs, worker, target, action, workerThreads, operationIndex, additionalMsec);
 
             remainingThreads -= workerThreads;
         }
@@ -372,6 +394,7 @@ export class Allocator
         target: TargetInfo,
         action: WorkerAction,
         threads: number,
+        operationIndex: number,
         additionalMsec: number = 0,
     ): void
     {
@@ -386,6 +409,7 @@ export class Allocator
             action,
             threads,
             allocatedRam,
+            operationIndex,
             additionalMsec,
         });
 

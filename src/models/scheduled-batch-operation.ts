@@ -10,5 +10,6 @@ export interface ScheduledBatchOperation
     startsAt: number;
     additionalMsec: number;
     landingAt: number;
+    operationIndex: number;
     fragments: ScheduledOperationFragment[];
 }

@@ -10,4 +10,5 @@ export interface WorkerJob
     createdAt: number;
     additionalMsec: number;
     batchId?: string;
+    operationIndex?: number;
 }

@@ -3,10 +3,11 @@ export async function main(ns)
     const target = String(ns.args[0]);
     const additionalMsec = Number(ns.args[1]);
     const batchId = String(ns.args[2]);
-    const hostname = String(ns.args[3]);
-    const threads = Number(ns.args[4]);
-    const telemetryPort = Number(ns.args[5]);
-    const telemetryFailurePort = Number(ns.args[6]);
+    const operationIndex = Number(ns.args[3]);
+    const hostname = String(ns.args[4]);
+    const threads = Number(ns.args[5]);
+    const telemetryPort = Number(ns.args[6]);
+    const telemetryFailurePort = Number(ns.args[7]);
 
     await ns.hack(target, { additionalMsec });
 
@@ -17,6 +18,7 @@ export async function main(ns)
         action: "hack",
         hostname,
         threads,
+        operationIndex,
         additionalMsec,
         landedAt,
     });
